@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#bg)"/>
+  <!-- Elegant abstract mosque arch / open book geometry -->
+  <path d="M256 100 C160 200 160 380 160 412 L352 412 C352 380 352 200 256 100 Z" fill="#ffffff" opacity="0.95"/>
+  <path d="M256 150 C190 230 190 380 190 412 L322 412 C322 380 322 230 256 150 Z" fill="url(#gold)"/>
+  <!-- Central geometric diamond -->
+  <polygon points="256,220 280,256 256,292 232,256" fill="#ffffff"/>
+</svg>

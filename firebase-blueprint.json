@@ -1,0 +1,391 @@
+{
+  "entities": {
+    "Note": {
+      "title": "Note",
+      "description": "User knowledge note entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "content": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "folderId": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "userId",
+        "title"
+      ]
+    },
+    "Draft": {
+      "title": "Draft",
+      "description": "User writing draft entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "content": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "userId",
+        "title"
+      ]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "User project entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "description": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "userId",
+        "title"
+      ]
+    },
+    "Book": {
+      "title": "Book",
+      "description": "User library book entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "authorId": {
+          "type": "string"
+        },
+        "categoryId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "userId",
+        "title"
+      ]
+    },
+    "Concept": {
+      "title": "Concept",
+      "description": "User concept entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "userId",
+        "name"
+      ]
+    },
+    "SourceFragment": {
+      "title": "SourceFragment",
+      "description": "User source fragment entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId",
+        "quote"
+      ]
+    },
+    "Relation": {
+      "title": "Relation",
+      "description": "User relation entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "sourceNodeId": {
+          "type": "string"
+        },
+        "targetNodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId",
+        "sourceNodeId",
+        "targetNodeId"
+      ]
+    },
+    "LearningPath": {
+      "title": "LearningPath",
+      "description": "User learning path entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId",
+        "title"
+      ]
+    },
+    "Phase": {
+      "title": "Phase",
+      "description": "User learning phase entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId",
+        "title"
+      ]
+    },
+    "Competency": {
+      "title": "Competency",
+      "description": "User learning competency entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId",
+        "title"
+      ]
+    },
+    "Deck": {
+      "title": "Deck",
+      "description": "User flashcard deck entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId",
+        "name"
+      ]
+    },
+    "Flashcard": {
+      "title": "Flashcard",
+      "description": "User flashcard entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "front": {
+          "type": "string"
+        },
+        "back": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "userId",
+        "front",
+        "back"
+      ]
+    }
+  },
+  "firestore": {
+    "/notes/{noteId}": {
+      "schema": {
+        "$ref": "#/entities/Note"
+      },
+      "description": "Collection of knowledge notes"
+    },
+    "/drafts/{draftId}": {
+      "schema": {
+        "$ref": "#/entities/Draft"
+      },
+      "description": "Collection of writing drafts"
+    },
+    "/projects/{projectId}": {
+      "schema": {
+        "$ref": "#/entities/Project"
+      },
+      "description": "Collection of projects"
+    },
+    "/books/{bookId}": {
+      "schema": {
+        "$ref": "#/entities/Book"
+      },
+      "description": "Collection of library books"
+    },
+    "/concepts/{conceptId}": {
+      "schema": {
+        "$ref": "#/entities/Concept"
+      },
+      "description": "Concepts"
+    },
+    "/sourceFragments/{fragmentId}": {
+      "schema": {
+        "$ref": "#/entities/SourceFragment"
+      },
+      "description": "Source Fragments"
+    },
+    "/relations/{relationId}": {
+      "schema": {
+        "$ref": "#/entities/Relation"
+      },
+      "description": "Relations"
+    },
+    "/learningPaths/{pathId}": {
+      "schema": {
+        "$ref": "#/entities/LearningPath"
+      },
+      "description": "Learning Paths"
+    },
+    "/phases/{phaseId}": {
+      "schema": {
+        "$ref": "#/entities/Phase"
+      },
+      "description": "Phases"
+    },
+    "/competencies/{competencyId}": {
+      "schema": {
+        "$ref": "#/entities/Competency"
+      },
+      "description": "Competencies"
+    },
+    "/decks/{deckId}": {
+      "schema": {
+        "$ref": "#/entities/Deck"
+      },
+      "description": "Decks"
+    },
+    "/flashcards/{flashcardId}": {
+      "schema": {
+        "$ref": "#/entities/Flashcard"
+      },
+      "description": "Flashcards"
+    }
+  }
+}

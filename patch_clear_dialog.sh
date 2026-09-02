@@ -1,0 +1,1 @@
+sed -i 's/  const handleClearData = async () => {/  const [isClearDialogOpen, setIsClearDialogOpen] = useState(false);\n\n  const handleClearData = async () => {/g' src/modules/settings/SettingsPage.tsx

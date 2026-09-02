@@ -1,0 +1,8 @@
+{
+  "name": "Madrasah — Personal Knowledge Operating System",
+  "description": "Personal Knowledge Operating System (PKOS) monokrom modern yang dioptimalkan penuh untuk mobile first, mencatatkan pengetahuan, dan spaced repetition menggunakan kecerdasan buatan HCNSEC AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

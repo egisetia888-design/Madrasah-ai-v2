@@ -1,0 +1,245 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(data) {
+      return isSignedIn()
+        && data.userId == request.auth.uid;
+    }
+
+    function isValidId(id) {
+      return id is string
+        && id.size() <= 128
+        && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function hasValidSyncMetadata(data) {
+      return data.keys().hasAll([
+        'userId',
+        'revision',
+        'updatedAt',
+        'syncStatus'
+      ])
+      && data.userId == request.auth.uid
+      && data.revision is int
+      && data.revision >= 1
+      && data.updatedAt is int
+      && data.updatedAt >= 0
+      && data.syncStatus in [
+        'local_only',
+        'pending_sync',
+        'syncing',
+        'synced',
+        'conflict',
+        'failed'
+      ];
+    }
+
+    function validCreate(data, docId) {
+      return isSignedIn()
+        && isValidId(docId)
+        && hasValidSyncMetadata(data)
+        && !('isAdmin' in data)
+        && !('shadowField' in data)
+        && data.keys().size() <= 30;
+    }
+
+    function validUpdate(data, existing) {
+      return isSignedIn()
+        && isOwner(existing)
+        && data.userId == existing.userId
+        && data.revision is int
+        && data.revision >= 1
+        && data.updatedAt is int
+        && data.updatedAt >= 0
+        && data.syncStatus in [
+          'local_only',
+          'pending_sync',
+          'syncing',
+          'synced',
+          'conflict',
+          'failed'
+        ]
+        && data.keys().size() <= 30;
+    }
+
+    function validTitleDoc(data) {
+      return data.title is string
+        && data.title.size() <= 500;
+    }
+
+    function validConcept(data) {
+      return data.name is string
+        && data.name.size() <= 500
+        && data.definition is string;
+    }
+
+    function validSourceFragment(data) {
+      return data.quote is string
+        && data.quote.size() <= 10000
+        && data.location is string
+        && data.reliabilityScore is number;
+    }
+
+    function validRelation(data) {
+      return data.sourceNodeId is string
+        && data.targetNodeId is string
+        && data.relationType is string
+        && data.confidenceScore is number
+        && data.createdBy in ['user', 'ai_agent']
+        && data.verifiedBySystem is bool;
+    }
+
+    function validDeck(data) {
+      return data.name is string
+        && data.name.size() <= 500
+        && data.description is string;
+    }
+
+    function validFlashcard(data) {
+      return data.front is string
+        && data.front.size() <= 10000
+        && data.back is string
+        && data.back.size() <= 10000
+        && (data.deckId == null || data.deckId is string)
+        && data.interval is number
+        && data.repetition is number
+        && data.efactor is number
+        && data.dueDate is number;
+    }
+
+    // Default deny.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------
+    // Standard title documents
+    // -------------------------
+
+    match /notes/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validTitleDoc(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validTitleDoc(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    match /drafts/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validTitleDoc(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validTitleDoc(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    match /projects/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validTitleDoc(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validTitleDoc(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    match /books/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validTitleDoc(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validTitleDoc(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    // -------------------------
+    // Knowledge architecture
+    // -------------------------
+
+    match /concepts/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validConcept(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validConcept(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    match /sourceFragments/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validSourceFragment(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validSourceFragment(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    match /relations/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validRelation(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validRelation(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    // -------------------------
+    // Curriculum
+    // -------------------------
+
+    match /learningPaths/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validTitleDoc(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validTitleDoc(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    match /phases/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validTitleDoc(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validTitleDoc(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    match /competencies/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validTitleDoc(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validTitleDoc(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    // -------------------------
+    // Spaced repetition
+    // -------------------------
+
+    match /decks/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validDeck(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validDeck(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    match /flashcards/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validFlashcard(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validFlashcard(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+  }
+}

@@ -1,0 +1,1 @@
+sed -i 's|    projects.forEach(project => {|    books.forEach(book => {\n      if (book.title.toLowerCase().includes(term)) {\n        results.push({ id: book.id, title: book.title, type: "Pustaka", icon: Book, action: () => handleSelect(`/library/${book.id}`) });\n      }\n    });\n\n    projects.forEach(project => {|g' src/components/layout/CommandPalette.tsx
