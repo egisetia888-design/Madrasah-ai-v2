@@ -102,14 +102,20 @@ export function BookDetailPage() {
   };
 
   const handleSaveQuickNote = () => {
-    if (book && quickNoteTitle.trim()) {
+    if (book) {
+      const contentText = quickNoteContent.trim();
+      const firstLine = quickNoteTitle.trim() || contentText.split('\n')[0]?.replace(/^[#>*\-\s]+/, '') || `Catatan Pustaka: ${book.title}`;
+      const finalTitle = firstLine.length > 50 ? `${firstLine.substring(0, 48)}...` : firstLine;
+
+      if (!quickNoteTitle.trim() && !contentText) return;
+
       const noteId = addNote({
-        title: quickNoteTitle.trim(),
-        content: quickNoteContent.trim(),
+        title: finalTitle,
+        content: contentText || quickNoteTitle.trim(),
         folderId: null,
-        tags: [],
+        tags: [book.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30), 'literatur'],
         sourceId: book.id,
-        type: 'knowledge',
+        type: 'literature',
         status: 'unprocessed'
       });
 
@@ -118,16 +124,16 @@ export function BookDetailPage() {
         book.id,
         noteId,
         'references',
-        `Catatan cepat untuk buku "${book.title}"`
+        `Catatan literatur untuk buku "${book.title}"`
       );
 
       // Auto-link entities mentioned in quick note
       try {
         autoLinkSingleEntity(
           noteId,
-          `${quickNoteTitle}\n${quickNoteContent}`,
+          `${finalTitle}\n${contentText}\n${book.title}`,
           'note',
-          quickNoteTitle.trim()
+          finalTitle
         );
       } catch (err) {
         console.warn('Auto-link error:', err);
@@ -136,6 +142,7 @@ export function BookDetailPage() {
       setQuickNoteTitle("");
       setQuickNoteContent("");
       setIsQuickAdding(false);
+      addToast({ type: 'success', message: 'Catatan literatur tersimpan & tertaut ke buku!' });
     }
   };
 
@@ -247,16 +254,24 @@ export function BookDetailPage() {
   const handleSaveSummaryAsNote = () => {
     if (!summaryResult) return;
     const contentText = `### Masalah Utama\n${summaryResult.mainProblem || '-'}\n\n### Metodologi\n${summaryResult.methodology || '-'}\n\n### Kesimpulan\n${summaryResult.conclusion || '-'}`;
-    addNote({
-      title: `Ringkasan AI: ${book.title}`,
+    const noteId = addNote({
+      title: `Ringkasan Literatur: ${book.title}`,
       content: contentText,
       folderId: null,
-      tags: [],
+      tags: ['rangkuman', 'literatur', book.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)],
       sourceId: book.id,
-      type: 'research',
+      type: 'literature',
       status: 'processed'
     });
-    addToast({ type: 'success', message: 'Catatan rangkuman berhasil disimpan!' });
+
+    try {
+      createExplicitRelation(book.id, noteId, 'references', `Rangkuman AI untuk buku "${book.title}"`);
+      autoLinkSingleEntity(noteId, `Ringkasan Literatur: ${book.title}\n${contentText}`, 'note', `Ringkasan Literatur: ${book.title}`);
+    } catch (err) {
+      console.warn('Auto link failed:', err);
+    }
+
+    addToast({ type: 'success', message: 'Catatan rangkuman literatur berhasil disimpan!' });
     setIsSummarizeOpen(false);
     setSummaryResult(null);
     setSummaryInputText("");

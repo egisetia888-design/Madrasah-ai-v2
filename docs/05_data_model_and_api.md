@@ -46,7 +46,7 @@ export interface Book extends SyncMetadata {
 
 ### 2. Entitas Zettelkasten & Konsep (Otak Kedua)
 ```typescript
-export type NoteType = 'knowledge' | 'project' | 'writing' | 'personal' | 'research';
+export type NoteType = 'fleeting' | 'literature' | 'permanent' | 'knowledge' | 'project' | 'writing' | 'personal' | 'research';
 export type NoteStatus = 'unprocessed' | 'processed';
 
 export interface Note extends SyncMetadata {
@@ -226,19 +226,36 @@ Server backend (`server.ts`) mengekspos 7 endpoint fungsional khusus untuk mempr
 
 Untuk melindungi infrastruktur server serta menghemat biaya konsumsi API pihak ketiga, server Express.js di Madrasah dilengkapi tiga lapisan proteksi internal:
 
-### 1. Gateway Penyedia AI Cerdas (HCNSEC & Multi-Provider Architecture)
-Server backend secara dinamis membaca konfigurasi penyedia AI melalui fungsi `executeAIRequest`:
-1. **Penyedia Utama (HCNSEC / OpenAI-Compatible Provider)**: Menggunakan `HCNSEC_API_KEY`, `HCNSEC_BASE_URL`, dan `HCNSEC_MODEL` melalui standar format endpoint OpenAI `/chat/completions`.
-2. **Fallback Sekunder (OpenRouter & Gemini)**: Menggunakan `OPENROUTER_API_KEY` atau `@google/genai` SDK jika provider utama tidak ditentukan.
+### 1. Gateway Penyedia AI Cerdas Mandiri (HCNSEC, OpenRouter, & Fallback Terakhir)
+Server backend secara terstruktur memprioritaskan penyedia AI mandiri non-Gemini melalui fungsi `executeAIRequest`:
+1. **Tier 1 — Provider Utama (HCNSEC / OpenAI-Compatible Provider)**:
+   - Membaca `HCNSEC_API_KEY` (atau fallback ke kredensial OpenAI).
+   - Format endpoint otomatis dinormalisasi ke `/chat/completions`.
+   - Urutan model kandidat adaptif: Memprioritaskan model aktif responsif (`Qwen3.8-27B`, `MiniMax-M3`) dengan batas waktu per-model pendek (4–8 detik) agar jika salah satu model gateway sedang lambat, sistem langsung berpindah ke model alternatif tanpa membuat pengguna menunggu lama.
+2. **Tier 2 — Provider Sekunder (OpenRouter Multi-Model Failover)**:
+   - Membaca `OPENROUTER_API_KEY`.
+   - Menggunakan failover multi-model teruji (`deepseek/deepseek-chat`, `qwen/qwen-2.5-72b-instruct`, `google/gemini-3.8-flash`) dengan batasan token ketat agar tidak memicu galat kuota (error 402).
+3. **Tier 3 — Cadangan Terakhir (Google GenAI SDK)**:
+   - Berfungsi murni sebagai jaring pengaman (*last-resort safety net*) apabila seluruh penyedia mandiri tidak dapat dihubungi atau kehabisan kuota secara bersamaan.
 
-### 2. Pembatasan Frekuensi (Rate Limiting)
+### 2. Formula Khusus per Fitur AI (Specialized Prompts & Parameters)
+Setiap endpoint API kini dilengkapi formula parameter unik (temperatur, batasan token, dan instruksi sistem terkalibrasi):
+- **/api/ai/zettelkasten**: Formula Sintesis Ta'dib (Temp 0.25, MaxTokens 1200) — Menganalisis relasi semantik, asal-usul (*provenance*), dan celah epistemik secara objektif tanpa bumbu basa-basi.
+- **/api/ai/suggest-tags**: Formula Taksonomi Presisi (Temp 0.1, MaxTokens 350) — Menghasilkan 3–5 kata kunci ringkas, 1 ikon Lucide yang valid secara deterministik, dan tautan relevan.
+- **/api/ai/generate-flashcards**: Formula Active Recall MIP (Temp 0.2, MaxTokens 1000) — Menerapkan *Minimum Information Principle* (1 konsep per kartu, 1–3 kalimat jawaban padat).
+- **/api/ai/grade-flashcard**: Formula Penilaian Semantik SM-2 (Temp 0.0, MaxTokens 300) — Mengukur keselarasan makna konseptual (skala SuperMemo 0–5) secara deterministik dan objektif.
+- **/api/ai/generate-syllabus**: Formula Taksonomi Bloom Berjenjang (Temp 0.25, MaxTokens 1600) — Menghasilkan 3–4 fase belajar berurutan (Fondasi -> Metode -> Sintesis/Implementasi) dengan capaian terukur.
+- **/api/ai/summarize-literature**: Formula Tiga Pilar Telaah Akademik (Temp 0.15, MaxTokens 800) — Mengekstrak Masalah Utama, Metodologi, dan Kesimpulan secara tajam.
+- **/api/ai/book-info**: Formula Estimasi Bibliografi (Temp 0.0, MaxTokens 250) — Sumber data utama Open Library API, dengan fallback AI estimasi halaman rasional jika buku tidak ditemukan di basis data publik.
+
+### 3. Pembatasan Frekuensi (Rate Limiting)
 - **API Limiter Umum** (`/api/*`): Membatasi setiap alamat IP pengguna maksimal 100 panggilan dalam jendela waktu 15 menit.
 - **AI Limiter Khusus** (`/api/ai/*`): Membatasi panggilan AI maksimal 30 permintaan per IP per menit untuk mencegah kelebihan beban pada kuota API.
 
-### 3. In-Memory Caching Engine (TTL 1 Jam)
+### 4. In-Memory Caching Engine (TTL 1 Jam)
 Server mendirikan mekanisme cache memori internal (`aiCache`) dengan masa aktif selama **1 jam**.
 - Setiap kali ada permintaan AI masuk, server membuat kunci unik berdasarkan hash endpoint dan isi payload body.
 - Jika permintaan dengan parameter yang sama masuk kembali sebelum batas waktu TTL berakhir, server akan mengembalikan hasil instan dari cache memori tanpa melakukan transaksi HTTP ulang ke penyedia AI luar.
 
-### 4. Pembersihan JSON Kokoh (Robust JSON Parsing)
+### 5. Pembersihan JSON Kokoh (Robust JSON Parsing)
 Respons dari model bahasa besar (LLM) sering kali terkontaminasi oleh blok kode Markdown (misalnya \`\`\`json ... \`\`\`) atau koma ekstra (*trailing commas*). Server Madrasah dilengkapi fungsi pembersihan ekspresi reguler khusus (`cleanAndParseJson`) untuk mengekstrak dan memvalidasi objek JSON murni sebelum dikirimkan ke aplikasi klien.

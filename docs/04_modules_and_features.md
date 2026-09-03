@@ -52,16 +52,21 @@ Modul penyimpanan literatur digital dan cetak.
 ## 4.3 Pilar 3: Zettelkasten & Jaring Kognitif (The Cognitive Core)
 
 ### 🧠 Otak Kedua (Notes & Inbox)
-Pusat dari seluruh sistem penataan ide, dibangun dengan metode pencatatan Zettelkasten.
-- **Fungsi**: Mengumpulkan ide, fakta, riset, dan menyintesisnya ke dalam struktur yang terorganisasi.
-- **Fitur Utama**:
+Pusat dari seluruh sistem penataan ide, dibangun dengan metode pencatatan Zettelkasten yang ringkas dan otomatis.
+- **Fungsi**: Mengumpulkan ide sekilas, intisari literatur, dan sintesis pemikiran mandiri tanpa gesekan formulir.
+- **Taksonomi Inti (Zettelkasten)**:
+  - **Fleeting (Sekilas)**: Ide kilat, pemikiran mentah, atau rekaman spontan. Otomatis masuk ke *Inbox (Mentah)* untuk diproses lebih lanjut.
+  - **Literature (Literatur)**: Intisari bacaan, kutipan berbobot, atau parafrasa sumber yang terikat ke konteks buku atau artikel referensi.
+  - **Permanent (Permanen)**: Pemikiran matang mandiri (satu ide pokok utuh), terhubung ke jaring graf konsep dan draf tulisan.
+- **Fitur Otomasi & Capture Lintas Tab**:
+  - **Single-Surface Rapid Capture**: Input catatan baru menggunakan kanvas tunggal Markdown dengan auto-ekstraksi judul cerdas (berdasarkan baris pertama `#` atau kalimat pembuka) dan auto-deteksi tipe catatan (misal teks berawalan kutipan langsung diklasifikasikan sebagai *Literature Note*).
+  - **Omni-Capture Global (QuickAddDialog)**: Pemicu kilat global dengan heuristik pintar otomatis membedakan Catatan, Tugas, Kutipan, atau Ide tanpa perlu memilih dropdown secara manual.
+  - **Otomasi Pustaka (Library Context)**: Penambahan intisari atau catatan dari halaman rincian buku (`BookDetailPage.tsx`) langsung terikat otomatis ke buku sumber, ditandai sebagai *Literature Note*, dan disinkronkan ke Graf Pengetahuan.
+  - **Otomasi Kurikulum (Curriculum Context)**: Tombol aksi langsung "Catat" pada kartu kompetensi (`PathDetailPage.tsx`) membuat catatan refleksi belajar terstruktur dan menautkannya ke simpul kompetensi via `createExplicitRelation`.
   - **Inbox & Status Proses**: Catatan yang baru dibuat masuk ke kategori *Unprocessed* (Mentah) di Inbox. Setelah diproses (diberi tag, dihubungkan, atau disarikan), statusnya berubah menjadi *Processed*.
   - **Folder Hierarkis & Tags**: Pengguna dapat menyusun catatan dalam folder fisik atau menggunakan sistem penandaan (*tagging*) lintas folder yang fleksibel.
   - **Automated Knowledge Linking**: Sistem mendeteksi penyebutan entitas lain (buku, konsep, proyek, kompetensi, draf tulisan) secara real-time saat mengetik dan otomatis menautkannya ke *Knowledge Graph* tanpa tindakan manual.
-  - **AI Zettelkasten Assistant**: Panel AI khusus di sisi editor catatan yang dapat:
-    1. **AI Suggest Tags**: Menganalisis konten catatan secara real-time dan memberikan saran tag yang relevan.
-    2. **AI Suggest Connections**: Merekomendasikan catatan lain yang relevan di dalam pustaka pengguna untuk dihubungkan.
-    3. **AI Chat & Synthesis**: Membedah isi catatan, merangkum, atau memformulasikan argumen baru berdasarkan referensi silang.
+  - **AI Zettelkasten Assistant**: Panel AI khusus di sisi editor catatan yang dapat menganalisis konten catatan, menyarankan tag, merekomendasikan koneksi semantik, dan merangkum relasi.
 
 ### 💡 Konsep (Conceptual Knowledge Units)
 Modul pematangan unit-unit pemikiran abstrak yang diekstraksi dari berbagai literatur.

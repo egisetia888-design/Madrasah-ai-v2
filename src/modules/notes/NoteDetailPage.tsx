@@ -506,12 +506,16 @@ export function NoteDetailPage() {
                  updateNote(note.id, { type: e.target.value as NoteType });
               }}
               disabled={previewMode}
-              className="appearance-none bg-white border border-gray-200 text-gray-700 py-1.5 pl-3 pr-8 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-gray-900 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+              className="appearance-none bg-white border border-gray-200 text-gray-700 py-1.5 pl-3 pr-8 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-gray-900 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              <option value="knowledge">Knowledge (Fakta, Ilmu)</option>
-              <option value="project">Project (Status, Dokumentasi)</option>
-              <option value="writing">Writing (Draft, Skrip)</option>
-              <option value="personal">Personal (Refleksi, Pengalaman)</option>
+              <option value="fleeting">Mentah (Fleeting / Inbox)</option>
+              <option value="literature">Literatur (Pustaka &amp; Telaah)</option>
+              <option value="permanent">Permanen (Gagasan Atomik)</option>
+              <option value="knowledge">Legacy: Knowledge</option>
+              <option value="research">Legacy: Research</option>
+              <option value="writing">Legacy: Writing</option>
+              <option value="project">Legacy: Project</option>
+              <option value="personal">Legacy: Personal</option>
             </select>
             <ChevronDown className="w-4 h-4 absolute right-2.5 top-2 text-gray-400 pointer-events-none" />
           </div>

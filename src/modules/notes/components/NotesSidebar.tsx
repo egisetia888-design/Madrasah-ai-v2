@@ -1,4 +1,4 @@
-﻿import { Search, Plus, FolderOpen, Folder as FolderIcon } from "lucide-react"
+import { Search, Plus, FolderOpen, Folder as FolderIcon } from "lucide-react"
 import { NoteType, Folder, Tag } from "../../../types"
 import { cn } from "../../../utils/cn"
 
@@ -52,11 +52,9 @@ export function NotesSidebar({
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2">Kategori</h3>
           {[
             { id: 'all', label: 'Semua Catatan' },
-            { id: 'knowledge', label: 'Knowledge (Ilmu)' },
-            { id: 'research', label: 'Research (Riset)' },
-            { id: 'project', label: 'Project (Proyek)' },
-            { id: 'writing', label: 'Writing (Tulisan)' },
-            { id: 'personal', label: 'Personal (Jurnal)' }
+            { id: 'fleeting', label: 'Tangkapan Mentah (Fleeting)' },
+            { id: 'literature', label: 'Catatan Pustaka (Literature)' },
+            { id: 'permanent', label: 'Gagasan Permanen (Permanent)' }
           ].map(tab => (
             <button
               key={tab.id}

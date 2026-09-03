@@ -1,4 +1,4 @@
-﻿import { useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import { Button } from "../../../components/ui/Button"
 import { LayoutGrid, List, FileText, Plus, Folder as FolderIcon, Network } from "lucide-react"
 import * as LucideIcons from "lucide-react"
@@ -103,9 +103,23 @@ export function NotesGrid({
                         {note.title}
                       </h3>
                     </div>
-                    {folder && (
+                    {folder ? (
+                      <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                        <span className="flex items-center gap-1"><FolderIcon className="w-3 h-3" /> {folder.name}</span>
+                        <span>&middot;</span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+                          {note.type === 'fleeting' || note.type === 'personal' ? 'Mentah' :
+                           note.type === 'literature' || note.type === 'knowledge' || note.type === 'research' ? 'Literatur' :
+                           note.type === 'permanent' || note.type === 'writing' || note.type === 'project' ? 'Permanen' : 'Catatan'}
+                        </span>
+                      </div>
+                    ) : (
                       <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
-                        <FolderIcon className="w-3 h-3" /> {folder.name}
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+                          {note.type === 'fleeting' || note.type === 'personal' ? 'Mentah' :
+                           note.type === 'literature' || note.type === 'knowledge' || note.type === 'research' ? 'Literatur' :
+                           note.type === 'permanent' || note.type === 'writing' || note.type === 'project' ? 'Permanen' : 'Catatan'}
+                        </span>
                       </div>
                     )}
                   </div>

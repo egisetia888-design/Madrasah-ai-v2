@@ -51,7 +51,7 @@ export interface BookInfoResponse {
   isEstimated: boolean;
 }
 
-export type NoteType = 'knowledge' | 'project' | 'writing' | 'personal' | 'research';
+export type NoteType = 'fleeting' | 'literature' | 'permanent' | 'knowledge' | 'project' | 'writing' | 'personal' | 'research';
 export type NoteStatus = 'unprocessed' | 'processed';
 
 export interface SourceFragment extends SyncMetadata {

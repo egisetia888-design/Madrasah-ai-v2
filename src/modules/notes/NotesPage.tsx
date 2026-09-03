@@ -34,7 +34,7 @@ export function NotesPage() {
   const [content, setContent] = useState("")
   const [rawQuote, setRawQuote] = useState("")
   const [referenceCitation, setReferenceCitation] = useState("")
-  const [noteType, setNoteType] = useState<NoteType>('knowledge')
+  const [noteType, setNoteType] = useState<NoteType>('fleeting')
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
 
   // Tagging
@@ -68,7 +68,17 @@ export function NotesPage() {
 
   const filteredNotes = useMemo(() => {
     return notes.filter(n => {
-      if (activeTab !== 'all' && n.type !== activeTab) return false;
+      if (activeTab !== 'all') {
+        if (activeTab === 'fleeting') {
+          if (n.type !== 'fleeting' && n.type !== 'personal') return false;
+        } else if (activeTab === 'literature') {
+          if (n.type !== 'literature' && n.type !== 'knowledge' && n.type !== 'research') return false;
+        } else if (activeTab === 'permanent') {
+          if (n.type !== 'permanent' && n.type !== 'writing' && n.type !== 'project') return false;
+        } else {
+          if (n.type !== activeTab) return false;
+        }
+      }
       if (activeFolderId && n.folderId !== activeFolderId) return false;
       if (activeTagId && !n.tags.includes(activeTagId)) return false;
       if (searchTerm) {
@@ -81,12 +91,12 @@ export function NotesPage() {
 
   const handleAddNote = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!title.trim()) return
-
-    if ((rawQuote.trim() && !referenceCitation.trim()) || (!rawQuote.trim() && referenceCitation.trim())) {
-      alert("Jika Anda memasukkan Kutipan Mentah atau Sumber Referensi, keduanya wajib diisi untuk menjaga jejak epistemologis.");
-      return;
-    }
+    
+    // Auto-derive title from first line of content if title was left blank
+    const contentLines = content.trim().split('\n').map(l => l.replace(/^[#>*\-\s]+/, '').trim()).filter(Boolean);
+    const derivedTitle = title.trim() || (contentLines.length > 0 ? (contentLines[0].length > 50 ? `${contentLines[0].substring(0, 48)}...` : contentLines[0]) : "Tangkapan Kilat");
+    
+    if (!derivedTitle.trim() && !content.trim()) return;
 
     // Process tags
     const finalTags = [...selectedTags];
@@ -99,22 +109,27 @@ export function NotesPage() {
     }
 
     const id = addNote({
-      title: title.trim(),
+      title: derivedTitle,
       content: content.trim(),
       rawQuote: rawQuote.trim(),
       referenceCitation: referenceCitation.trim(),
-      type: noteType,
+      type: noteType || 'fleeting',
       status: 'unprocessed',
       folderId: selectedFolder || activeFolderId,
       tags: finalTags,
     })
 
     // Automatically link mentions and concepts in this note
-    const linkedCount = autoLinkSingleEntity(id, `${title.trim()}\n${content.trim()}\n${rawQuote.trim()}`, 'note', title.trim());
+    const linkedCount = autoLinkSingleEntity(id, `${derivedTitle}\n${content.trim()}\n${rawQuote.trim()}`, 'note', derivedTitle);
     if (linkedCount > 0) {
       addToast({
         type: 'success',
         message: `Catatan disimpan & ${linkedCount} relasi otomatis ditautkan ke Knowledge Graph!`
+      });
+    } else {
+      addToast({
+        type: 'success',
+        message: `Catatan berhasil disimpan ke Otak Kedua!`
       });
     }
 
@@ -125,7 +140,7 @@ export function NotesPage() {
     setContent("")
     setRawQuote("")
     setReferenceCitation("")
-    setNoteType('knowledge')
+    setNoteType('fleeting')
     setSelectedTags([])
     setSuggestedTags([])
     setSuggestedConnections([])
@@ -270,11 +285,9 @@ export function NotesPage() {
         <div className="flex items-center gap-1.5 overflow-x-auto w-full no-scrollbar py-1 scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0">
           {[
             { id: 'all', label: 'Semua' },
-            { id: 'knowledge', label: 'Knowledge' },
-            { id: 'research', label: 'Research' },
-            { id: 'project', label: 'Project' },
-            { id: 'writing', label: 'Writing' },
-            { id: 'personal', label: 'Personal' }
+            { id: 'fleeting', label: 'Mentah (Inbox)' },
+            { id: 'literature', label: 'Literatur' },
+            { id: 'permanent', label: 'Permanen' }
           ].map(tab => (
             <button
               key={tab.id}

@@ -52,7 +52,7 @@ export const useNotesStore = create<NotesState>()(
       addNote: (noteData) => {
         const id = crypto.randomUUID();
         const newNote: Note = {
-          type: 'knowledge',
+          type: 'fleeting',
           status: 'unprocessed',
           ...noteData,
           id,

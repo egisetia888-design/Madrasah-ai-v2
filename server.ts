@@ -83,6 +83,8 @@ interface AICallOptions {
   timeoutMs?: number;
   tools?: any[];
   maxTokens?: number;
+  temperature?: number;
+  purpose?: string;
 }
 
 function formatAIEndpoint(rawBaseUrl?: string): string {
@@ -102,120 +104,172 @@ function formatAIEndpoint(rawBaseUrl?: string): string {
 }
 
 async function executeAIRequest(options: AICallOptions): Promise<string> {
-  const timeoutMs = options.timeoutMs || 60000;
+  const timeoutMs = options.timeoutMs || 45000;
+  const temperature = options.temperature ?? 0.2;
+  const maxTokens = options.maxTokens || 1200;
+  const purpose = options.purpose || "general";
   
   const aiPromise = (async () => {
-    // 1. Check for custom / HCNSEC or OpenAI-compatible Base URL & Key configuration
-    const hcnsecApiKey = process.env.HCNSEC_API_KEY || process.env.AI_API_KEY || process.env.OPENAI_API_KEY;
+    // =========================================================================
+    // 1. TIER 1: HCNSEC / Enterprise OpenAI-compatible Provider (PRIMARY)
+    // =========================================================================
+    const hcnsecApiKey = (process.env.HCNSEC_API_KEY || process.env.AI_API_KEY || process.env.OPENAI_API_KEY || "").trim();
     const hcnsecBaseUrl = process.env.HCNSEC_BASE_URL || process.env.AI_BASE_URL || process.env.OPENAI_BASE_URL || process.env.BASE_URL;
-    const hcnsecModel = process.env.HCNSEC_MODEL || process.env.AI_MODEL || "google/gemini-3.8-flash";
 
     if (hcnsecApiKey || hcnsecBaseUrl) {
-      const apiKey = (hcnsecApiKey || process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+      const apiKey = hcnsecApiKey || (process.env.OPENROUTER_API_KEY || "").trim();
       const endpoint = formatAIEndpoint(hcnsecBaseUrl);
 
+      // Model priority for HCNSEC:
+      // Verified online models on api.hcnsec.cn: Qwen3.8-27B (fastest & high precision), MiniMax-M3.
+      // DeepSeek-V4-Pro may time out on upstream gateway, so we prioritize active responsive models.
+      const configuredModel = (process.env.HCNSEC_MODEL || process.env.AI_MODEL || "").trim();
+      const candidateModels: string[] = [];
+      
+      if (configuredModel && configuredModel !== "DeepSeek-V4-Pro" && configuredModel !== "kimi-k3") {
+        candidateModels.push(configuredModel);
+      }
+      candidateModels.push("Qwen3.8-27B", "MiniMax-M3");
+      if (configuredModel && !candidateModels.includes(configuredModel)) {
+        candidateModels.push(configuredModel);
+      }
+
       const messages = [
         { role: "system", content: options.systemInstruction },
         { role: "user", content: options.userPrompt }
       ];
 
-      const body: any = {
-        model: hcnsecModel,
-        messages,
-        max_tokens: options.maxTokens || 1500
-      };
+      for (const model of candidateModels) {
+        const isKnownFast = model === "Qwen3.8-27B";
+        const modelTimeout = isKnownFast ? 8000 : 4000;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), modelTimeout);
 
-      if (options.jsonMode) {
-        body.response_format = { type: "json_object" };
-      }
+        try {
+          const body: any = {
+            model,
+            messages,
+            temperature,
+            max_tokens: maxTokens
+          };
 
-      const hcnsecTimeout = Math.min(timeoutMs, 6000);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), hcnsecTimeout);
+          if (options.jsonMode) {
+            body.response_format = { type: "json_object" };
+          }
 
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": process.env.APP_URL || "https://madrasah.remix",
-            "X-Title": "Remix Madrasah"
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal
-        });
-        clearTimeout(timer);
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": process.env.APP_URL || "https://madrasah.remix",
+              "X-Title": "Remix Madrasah"
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal
+          });
+          clearTimeout(timer);
 
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`HCNSEC / AI Provider error (${response.status}): ${errText}`);
+          if (response.ok) {
+            const data = await response.json() as any;
+            const content = data.choices?.[0]?.message?.content;
+            if (typeof content === "string" && content.trim()) {
+              console.log(`[AI Provider: HCNSEC] Served (${purpose}) using model ${model}`);
+              return content;
+            }
+          } else {
+            const errText = await response.text();
+            console.warn(`[AI Provider: HCNSEC] Model ${model} returned status ${response.status}:`, errText.slice(0, 150));
+          }
+        } catch (err: any) {
+          clearTimeout(timer);
+          console.warn(`[AI Provider: HCNSEC] Model ${model} failed:`, err?.message || err);
         }
-
-        const data = await response.json() as any;
-        return data.choices?.[0]?.message?.content || "";
-      } catch (err: any) {
-        clearTimeout(timer);
-        console.warn("[AI Provider] HCNSEC call failed, checking fallbacks:", err?.message || err);
-        // If user configured HCNSEC explicitly, surface meaningful error if fallbacks are disabled
-        if (hcnsecApiKey && !process.env.OPENROUTER_API_KEY && !process.env.GEMINI_API_KEY) {
-          throw new Error(`HCNSEC Provider Error: ${err?.message || err}`);
-        }
       }
+      console.warn("[AI Provider] HCNSEC models exhausted or unresponsive, seamlessly switching to Tier 2 (OpenRouter)...");
     }
 
-    // 2. OpenRouter provider (if OPENROUTER_API_KEY is configured)
+    // =========================================================================
+    // 2. TIER 2: OpenRouter Multi-Model Provider (SECONDARY STABILITY PROVIDER)
+    // =========================================================================
     if (process.env.OPENROUTER_API_KEY) {
+      const orApiKey = process.env.OPENROUTER_API_KEY.trim();
+      const configuredOrModel = (process.env.OPENROUTER_MODEL || "").trim();
+
+      const orCandidateModels: string[] = [];
+      if (configuredOrModel && configuredOrModel !== "google/gemini-2.0-flash-001") {
+        orCandidateModels.push(configuredOrModel);
+      }
+      orCandidateModels.push(
+        "deepseek/deepseek-chat",
+        "qwen/qwen-2.5-72b-instruct",
+        "google/gemini-3.8-flash"
+      );
+      const uniqueOrModels = [...new Set(orCandidateModels)];
+
       const messages = [
         { role: "system", content: options.systemInstruction },
         { role: "user", content: options.userPrompt }
       ];
 
-      const body: any = {
-        model: process.env.OPENROUTER_MODEL || "google/gemini-3.8-flash",
-        messages,
-        max_tokens: options.maxTokens || 1500
-      };
+      for (const model of uniqueOrModels) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 9000);
 
-      if (options.jsonMode) {
-        body.response_format = { type: "json_object" };
-      }
+        try {
+          const body: any = {
+            model,
+            messages,
+            temperature,
+            max_tokens: maxTokens
+          };
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs - 2000);
+          if (options.jsonMode) {
+            body.response_format = { type: "json_object" };
+          }
 
-      try {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": process.env.APP_URL || "https://madrasah.remix",
-            "X-Title": "Remix Madrasah"
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal
-        });
-        clearTimeout(timer);
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${orApiKey}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": process.env.APP_URL || "https://madrasah.remix",
+              "X-Title": "Remix Madrasah"
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal
+          });
+          clearTimeout(timer);
 
-        if (response.ok) {
-          const data = await response.json() as any;
-          return data.choices?.[0]?.message?.content || "";
+          if (response.ok) {
+            const data = await response.json() as any;
+            const content = data.choices?.[0]?.message?.content;
+            if (typeof content === "string" && content.trim()) {
+              console.log(`[AI Provider: OpenRouter] Served (${purpose}) using model ${model}`);
+              return content;
+            }
+          } else {
+            const errText = await response.text();
+            console.warn(`[AI Provider: OpenRouter] Model ${model} returned status ${response.status}:`, errText.slice(0, 150));
+          }
+        } catch (err: any) {
+          clearTimeout(timer);
+          console.warn(`[AI Provider: OpenRouter] Model ${model} failed:`, err?.message || err);
         }
-        const errText = await response.text();
-        console.warn(`[AI Provider] OpenRouter returned ${response.status}: ${errText}`);
-      } catch (err: any) {
-        clearTimeout(timer);
-        console.warn("[AI Provider] OpenRouter request failed:", err?.message || err);
       }
+      console.warn("[AI Provider] OpenRouter models exhausted or unresponsive, checking last-resort fallback...");
     }
 
-    // 3. Google GenAI SDK fallback (if GEMINI_API_KEY is configured)
+    // =========================================================================
+    // 3. TIER 3: Google GenAI SDK (LAST-RESORT SAFETY NET ONLY)
+    // =========================================================================
     const gemini = getGeminiClient();
     if (gemini) {
       try {
+        console.log(`[AI Provider: Gemini SDK] Invoking last-resort safety net for (${purpose})...`);
         const config: any = {
           systemInstruction: options.systemInstruction,
+          temperature
         };
         if (options.jsonMode) {
           config.responseMimeType = "application/json";
@@ -235,22 +289,23 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
         });
 
         if (response.text) {
+          console.log(`[AI Provider: Gemini SDK] Served (${purpose}) via ${geminiModel}`);
           return response.text;
         }
       } catch (err: any) {
-        console.warn("[AI Provider] Gemini API request failed:", err?.message || err);
+        console.warn("[AI Provider: Gemini SDK] Last-resort fallback failed:", err?.message || err);
         if (err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED')) {
-          throw new Error("Kuota AI Anda telah habis (Rate Limit 429). Silakan gunakan kunci API baru atau tunggu beberapa saat.");
+          throw new Error("Kuota AI pada semua penyedia telah habis (Rate Limit 429). Silakan tunggu beberapa saat.");
         }
         throw new Error(`AI Provider Error: ${err?.message || err}`);
       }
     }
 
-    throw new Error("Layanan AI belum dikonfigurasi. Silakan pastikan HCNSEC_API_KEY, OPENROUTER_API_KEY, atau GEMINI_API_KEY tersedia di Settings > Secrets.");
+    throw new Error("Layanan AI mandiri (HCNSEC / OpenRouter) tidak dapat dihubungi dan tidak ada cadangan aktif. Periksa konfigurasi di Settings > Secrets.");
   })();
 
   const timeoutPromise = new Promise<string>((_, reject) => {
-    setTimeout(() => reject(new Error("Permintaan AI melebihi batas waktu (timeout). Silakan coba lagi.")), timeoutMs);
+    setTimeout(() => reject(new Error("Permintaan AI melebihi batas waktu maksimal. Silakan coba lagi.")), timeoutMs);
   });
 
   return Promise.race([aiPromise, timeoutPromise]);
@@ -315,24 +370,31 @@ async function startServer() {
       }
       
       const systemInstruction = `
-      You are a Smart PKOS (Personal Knowledge Operating System) Assistant for Madrasah.
-      Your job is to analyze the user's semantic knowledge base and help them:
-      1. Trace provenance: Understand how concepts are formed from source fragments and notes.
-      2. Find semantic relationships (supports, contradicts, expands) between different knowledge blocks.
-      3. Suggest new ideas or identify gaps based on the graph.
+      You are the Madrasah PKOS Knowledge Synthesis Engine.
+      Analyze the user's semantic knowledge base with precision and intellectual humility (ta'dib).
+      Your objectives:
+      1. Conceptual Synthesis: Synthesize core ideas directly grounded in the provided notes, concepts, and source fragments (preserve provenance).
+      2. Semantic Relationships: Identify genuine connections, contradictions, or complementary relationships between knowledge blocks.
+      3. Epistemic Gaps & Thought Trajectories: Point out logical gaps, missing premises, or promising directions for deeper inquiry.
+
+      Strict Rules:
+      - Output in clean, articulate Indonesian Markdown.
+      - Cite exact note titles or source quotes when making assertions.
+      - Be concise, analytical, and completely free of conversational filler, sycophancy, or marketing clichés.
       
       User's Context:
       Notes: ${JSON.stringify(sanitizedNotes)}
       Concepts: ${JSON.stringify(sanitizedConcepts)}
       Source Fragments: ${JSON.stringify(sanitizedFragments)}
       Relations: ${JSON.stringify(relations.slice(0, 10))}
-      
-      Respond directly and helpfully in Indonesian. Format your response cleanly using Markdown. Use citations/provenance where possible.
       `;
 
       const text = await executeAIRequest({
         systemInstruction,
-        userPrompt: String(prompt || '').slice(0, 2000)
+        userPrompt: String(prompt || '').slice(0, 2000),
+        temperature: 0.25,
+        maxTokens: 1200,
+        purpose: "zettelkasten"
       });
 
       const resultData = { result: text };
@@ -365,17 +427,20 @@ async function startServer() {
       }
       
       const systemInstruction = `
-      You are a Knowledge Taxonomy Assistant. Analyze a new knowledge snippet from the user and:
-      1. Suggest 3-5 relevant abstract concepts or tags (short keywords in Indonesian or English).
-      2. Suggest 1 most relevant Lucide-react icon name (e.g., 'Brain', 'Book', 'Database', 'FileText', 'Sparkles', 'Layers', 'Code', 'PenTool').
-      3. Suggest 1-3 connections to existing notes (return exact titles).
+      You are the Madrasah Knowledge Taxonomy Engine.
+      Analyze the input snippet and extract concise, deterministic conceptual metadata.
+
+      Output Requirements:
+      1. tags: 3 to 5 lowercase conceptual keywords in Indonesian or English (no hashtag symbols, no spaces within a single tag).
+      2. icon: Exactly 1 valid Lucide-react icon name that best represents the semantic theme (strictly choose from: 'Brain', 'BookOpen', 'Bookmark', 'FileText', 'Lightbulb', 'Layers', 'Sparkles', 'Compass', 'Search', 'Archive', 'Code', 'PenTool', 'Scale', 'Shield', 'Target', 'Folder', 'GraduationCap').
+      3. connections: 1 to 3 exact matching titles from existing notes if there is a direct conceptual relation.
       
       Context references:
       Existing Notes: ${JSON.stringify(sanitizedNotes)}
       Existing Concepts: ${JSON.stringify(sanitizedConcepts)}
       
       Respond ONLY with a raw JSON object matching the schema:
-      {"tags": ["tag1", "tag2"], "icon": "Brain", "connections": ["Note Title"]}
+      {"tags": ["tag1", "tag2"], "icon": "BookOpen", "connections": ["Note Title"]}
       `;
 
       const schema = {
@@ -392,7 +457,10 @@ async function startServer() {
         systemInstruction,
         userPrompt: `New snippet:\n${sanitizedContent}`,
         jsonMode: true,
-        responseSchema: schema
+        responseSchema: schema,
+        temperature: 0.1,
+        maxTokens: 350,
+        purpose: "suggest-tags"
       });
 
       const parsed = cleanAndParseJson(text, { tags: [], icon: "FileText", connections: [] });
@@ -430,11 +498,16 @@ async function startServer() {
       }
       
       const systemInstruction = `
-      You are an expert at creating Spaced Repetition Flashcards. Your job is to analyze the provided note content and extract 5-10 crucial Question & Answer pairs in Indonesian.
-      Focus on core concepts, important facts, and principles.
+      You are the Madrasah Spaced Repetition Flashcard Engine, strictly adhering to the SuperMemo Minimum Information Principle (MIP).
+      Extract 5-8 high-yield active recall Question & Answer pairs from the content in Indonesian.
+
+      Core Principles:
+      - 1 concept per card (atomic flashcards). Never create complex multi-part questions.
+      - Question (front): Clear, unambiguous, and focused on principles, causes, definitions, or mechanisms.
+      - Answer (back): Concise, direct, and factual (1-3 sentences maximum).
       
       Respond ONLY with a raw JSON object with the "flashcards" array:
-      {"flashcards": [{"front": "Pertanyaan...", "back": "Jawaban..."}]}
+      {"flashcards": [{"front": "Pertanyaan spesifik...", "back": "Jawaban padat..."}]}
       `;
 
       const schema = {
@@ -459,7 +532,10 @@ async function startServer() {
         systemInstruction,
         userPrompt: `Create flashcards from this note:\n\n${sanitizedContent}`,
         jsonMode: true,
-        responseSchema: schema
+        responseSchema: schema,
+        temperature: 0.2,
+        maxTokens: 1000,
+        purpose: "generate-flashcards"
       });
 
       const parsed = cleanAndParseJson(text, { flashcards: [] });
@@ -501,22 +577,23 @@ async function startServer() {
       }
       
       const systemInstruction = `
-      You are an intelligent Grading Assistant for spaced repetition.
-      Evaluate the user's answer based on conceptual understanding, NOT exact word matching.
-      If the user's answer demonstrates they understand the core concept of the correct answer, grade it as correct.
-      If it's partially correct, give them a lower quality score (e.g., 2 or 3) and explain what they missed.
-      If it's completely wrong, grade it as incorrect (quality 0 or 1).
-      
-      Quality Scale (0-5 integer):
-      0: Complete blackout / completely wrong.
-      1: Incorrect, but remembered something related.
-      2: Incorrect, but it seemed easy to recall the right answer after seeing it.
-      3: Correct, but with significant difficulty or partial completeness.
-      4: Correct, after some hesitation.
-      5: Perfect, fluent recall.
+      You are an objective SuperMemo-2 (SM-2) Conceptual Grading Engine.
+      Evaluate the user's answer based on SEMANTIC EQUIVALENCE to the correct answer, NOT literal verbatim matching.
+
+      SM-2 Quality Scale (0 to 5 integer):
+      - 5: Perfect conceptual recall; fully accurate and complete.
+      - 4: Correct and substantive recall, with minor non-critical omission.
+      - 3: Partially correct; grasped the core theme but missed an essential mechanism or element.
+      - 2: Incorrect, but showed tangential familiarity or partial recall of keywords.
+      - 1: Incorrect, completely failed to demonstrate understanding.
+      - 0: Completely blank, nonsensical, or irrelevant answer.
+
+      Feedback rules:
+      - 1-2 objective, respectful sentences in Indonesian explaining precisely what was accurate and what was missing.
+      - No sycophantic praise, no generic filler.
  
       Respond ONLY with a raw JSON object matching the schema:
-      {"isCorrect": true, "quality": 4, "feedback": "Penjelasan singkat evaluasi dalam Bahasa Indonesia."}
+      {"isCorrect": true, "quality": 4, "feedback": "Penjelasan evaluasi objektif dalam Bahasa Indonesia."}
       `;
 
       const schema = {
@@ -533,7 +610,10 @@ async function startServer() {
         systemInstruction,
         userPrompt: `Question: ${question}\nCorrect Answer: ${correctAnswer}\nUser's Answer: ${userAnswer}`,
         jsonMode: true,
-        responseSchema: schema
+        responseSchema: schema,
+        temperature: 0.0,
+        maxTokens: 300,
+        purpose: "grade-flashcard"
       });
 
       const parsed = cleanAndParseJson(text, { isCorrect: false, quality: 1, feedback: "Jawaban perlu diperdalam lagi." });
@@ -570,26 +650,31 @@ async function startServer() {
       }
       
       const systemInstruction = `
-      You are an expert AI Syllabus Planner and Curriculum Designer.
-      The user will provide a topic or skill they want to master (e.g., "Dasar-dasar Machine Learning", "Sejarah Filsafat Barat").
-      Your job is to generate a structured learning path for this topic, starting from beginner to advanced.
- 
-      You must break the topic down into 3 to 5 logical 'Phases' (Fase Belajar).
-      For each Phase, provide 3 to 6 'Competencies' (Kompetensi/Tugas) that the user needs to achieve.
+      You are the Madrasah Modular Curriculum & Syllabus Engine.
+      Design a rigorous, structured learning path based on progressive Bloom's taxonomy (Foundational Knowledge -> Core Methodology -> Advanced Synthesis & Application).
+
+      Structural Requirements:
+      1. Title and comprehensive description in Indonesian.
+      2. Exactly 3 to 4 sequential pedagogical phases:
+         - Phase 1: Fondasi Konseptual & Terminologi Inti
+         - Phase 2: Metode, Praktik, & Analisis Inti
+         - Phase 3: Implementasi Kritis, Studi Kasus, & Sintesis
+         - (Optional) Phase 4: Penguasaan Mandiri & Penerapan Lanjut
+      3. Each phase must contain 3 to 5 concrete competencies featuring measurable operational verbs.
  
       Provide all responses in Indonesian.
  
       Respond ONLY with a raw JSON object matching the schema:
       {
         "title": "Judul Jalur Belajar",
-        "description": "Deskripsi singkat",
+        "description": "Deskripsi singkat tujuan kurikulum",
         "phases": [
           {
             "title": "Fase 1: Judul",
             "description": "Deskripsi fase",
             "order": 1,
             "competencies": [
-              { "title": "Kompetensi 1", "description": "Deskripsi kompetensi" }
+              { "title": "Kompetensi 1", "description": "Deskripsi kompetensi capaian terukur" }
             ]
           }
         ]
@@ -632,7 +717,10 @@ async function startServer() {
         systemInstruction,
         userPrompt: `Topic: ${topic}`,
         jsonMode: true,
-        responseSchema: schema
+        responseSchema: schema,
+        temperature: 0.25,
+        maxTokens: 1600,
+        purpose: "generate-syllabus"
       });
 
       const parsed = cleanAndParseJson(text, { title: topic, description: "Silabus pembelajaran komprehensif.", phases: [] });
@@ -686,12 +774,11 @@ async function startServer() {
       }
       
       const systemInstruction = `
-      You are an expert academic assistant for literature reviews.
-      The user will provide the abstract, notes, or full text of an academic paper or book chapter.
-      Your task is to summarize the material into exactly 3 key sections in Indonesian:
-      1. Masalah Utama (The Main Problem / Core Challenge)
-      2. Metodologi (The Methodology / Approach / Argument Structure)
-      3. Kesimpulan (The Key Conclusion / Takeaway)
+      You are the Madrasah Academic Literature Analysis Engine.
+      Deconstruct academic or philosophical literature into the Three Pillars of Scholarly Review in Indonesian:
+      1. mainProblem (Masalah Utama): The central epistemic, theoretical, or empirical question addressed.
+      2. methodology (Metodologi / Alur Argumen): The analytical framework, conceptual apparatus, or line of reasoning employed.
+      3. conclusion (Kesimpulan & Implikasi): The core thesis, findings, or practical implications established.
  
       Respond ONLY with a raw JSON object matching this schema:
       {
@@ -716,7 +803,10 @@ async function startServer() {
         systemInstruction,
         userPrompt: `Literature Content:\n${content}`,
         jsonMode: true,
-        responseSchema: schema
+        responseSchema: schema,
+        temperature: 0.15,
+        maxTokens: 800,
+        purpose: "summarize-literature"
       });
 
       const parsed = cleanAndParseJson(text, {});
@@ -892,15 +982,14 @@ async function fetchFromOpenLibrary(title: string, author?: string): Promise<Ope
       
       // Step 2: Fallback to AI estimation
       const systemInstruction = `
-      You are a smart library metadata assistant acting as a fallback for Madrasah PKOS.
+      You are the Madrasah Bibliographic Metadata Estimation Engine.
       The Open Library API returned no direct records for "${cleanTitle}".
-      Your task is to provide an ESTIMATED total page count and optional cover URL for this book.
+      Provide an objective estimated page count and optional cover URL for this published work.
       
-      CRITICAL INSTRUCTIONS:
-      1. Since this is an AI estimate and not an official verified record, provide a realistic estimated total page count.
-      2. If you know a valid Open Library ISBN or Cover ID, you may construct "https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg" or "https://covers.openlibrary.org/b/id/{cover_id}-L.jpg".
-      3. If you cannot confidently determine the ISBN or Cover ID, return an empty string "" instead of guessing invalid URLs.
-      4. Note that results from this pathway will be flagged as an estimate ("isEstimated: true").
+      Requirements:
+      1. Provide a realistic estimated total page count based on typical published or academic editions.
+      2. If you know a valid Open Library ISBN or Cover ID, you may provide "https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg" or "https://covers.openlibrary.org/b/id/{cover_id}-L.jpg".
+      3. If no verified ISBN or Cover ID is known, return an empty string "" instead of guessing invalid URLs.
       
       Respond ONLY with a raw JSON object matching the schema:
       {"totalPages": 320, "coverUrl": ""}
@@ -920,7 +1009,9 @@ async function fetchFromOpenLibrary(title: string, author?: string): Promise<Ope
         userPrompt: `Title: ${cleanTitle}\nAuthor: ${cleanAuthor || "Unknown"}`,
         jsonMode: true,
         responseSchema: schema,
-        maxTokens: 500
+        temperature: 0.0,
+        maxTokens: 250,
+        purpose: "book-info"
       });
 
       const parsed = cleanAndParseJson(text, { totalPages: 0, coverUrl: "" });

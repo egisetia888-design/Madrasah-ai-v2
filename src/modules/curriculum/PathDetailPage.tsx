@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
-import { ArrowLeft, Plus, MoreVertical, BookOpen, PenTool, Brain, Target, CheckCircle2, ChevronRight, Circle, Trash2, Edit2, Save, Network, ArrowUpRight } from "lucide-react";
+import { ArrowLeft, Plus, MoreVertical, BookOpen, PenTool, Brain, Target, CheckCircle2, ChevronRight, Circle, Trash2, Edit2, Save, Network, ArrowUpRight, FileText } from "lucide-react";
 import { useCurriculumStore } from "../../store/curriculumStore";
 import { useLibraryStore } from "../../store/libraryStore";
 import { useWritingStore } from "../../store/writingStore";
 import { useKnowledgeStore } from "../../store/knowledgeStore";
+import { useNotesStore } from "../../store/notesStore";
+import { useToastStore } from "../../store/toastStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog";
-import { scanTextForEntities, autoLinkSingleEntity } from "../../utils/autoLinker";
+import { scanTextForEntities, autoLinkSingleEntity, createExplicitRelation } from "../../utils/autoLinker";
 
 export function PathDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -30,6 +32,8 @@ export function PathDetailPage() {
 
   const books = useLibraryStore(state => state.books);
   const drafts = useWritingStore(state => state.drafts);
+  const addNote = useNotesStore(state => state.addNote);
+  const addToast = useToastStore(state => state.addToast);
 
   const [isAddPhaseOpen, setIsAddPhaseOpen] = useState(false);
   const [newPhaseTitle, setNewPhaseTitle] = useState("");
@@ -172,6 +176,28 @@ export function PathDetailPage() {
       updateCompetency(compId, { outputIds: comp.outputIds.filter(id => id !== outputId) });
     }
   }
+
+  const handleAddStudyNote = (comp: any) => {
+    const noteTitle = `Catatan: ${comp.title}`;
+    const noteId = addNote({
+      title: noteTitle,
+      content: `Refleksi & pemahaman terkait kompetensi **${comp.title}** pada alur "${path?.title || 'Kurikulum'}":\n\n- `,
+      type: 'permanent',
+      status: 'unprocessed',
+      folderId: null,
+      tags: ['kurikulum', comp.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 25)]
+    });
+
+    try {
+      createExplicitRelation(comp.id, noteId, 'applies', `Catatan belajar untuk kompetensi "${comp.title}"`);
+      autoLinkSingleEntity(noteId, `${noteTitle}\n${comp.title}\n${path?.title || ''}`, 'note', noteTitle);
+    } catch (err) {
+      console.warn('Auto link note error:', err);
+    }
+
+    addToast({ type: 'success', message: 'Catatan belajar dibuat & ditautkan ke kompetensi!' });
+    navigate(`/notes/${noteId}`);
+  };
 
   const getBookTitle = (id: string) => books.find(b => b.id === id)?.title || "Unknown Book";
   const getDraftTitle = (id: string) => drafts.find(d => d.id === id)?.title || "Unknown Output";
@@ -326,9 +352,14 @@ export function PathDetailPage() {
                                        <span className="inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-gray-500 bg-gray-100 px-2 py-1 rounded">
                                          <Target className="w-3 h-3" /> Asesmen: {comp.assessmentStatus || 'Tidak ada'}
                                        </span>
-                                       <Button variant="ghost" size="sm" onClick={() => openManageCompetency(comp.id)} className="h-6 text-[10px] px-2 ml-auto">
-                                          Kelola
-                                       </Button>
+                                       <div className="flex items-center gap-1 ml-auto">
+                                         <Button variant="ghost" size="sm" onClick={() => handleAddStudyNote(comp)} className="h-6 text-[10px] px-2 text-gray-700 hover:text-gray-900">
+                                           <FileText className="w-3 h-3 mr-1" /> Catat
+                                         </Button>
+                                         <Button variant="ghost" size="sm" onClick={() => openManageCompetency(comp.id)} className="h-6 text-[10px] px-2">
+                                           Kelola
+                                         </Button>
+                                       </div>
                                      </div>
                                      {comp.bookIds.length > 0 && (
                                        <div className="flex flex-wrap gap-1 mb-2">
