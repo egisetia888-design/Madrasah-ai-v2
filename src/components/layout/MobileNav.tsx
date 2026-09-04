@@ -3,6 +3,7 @@ import { NavLink, useLocation } from "react-router-dom"
 import { LayoutDashboard, Library, PenTool, Map, Briefcase, FileText, Network, FlaskConical, Menu, X, Brain, BarChart2, Settings, Command, Zap, BrainCircuit } from "lucide-react"
 import { cn } from "../../utils/cn"
 import { useUIStore } from "../../store/uiStore"
+import { PWAInstallButton } from "../PWAInstallButton"
 
 const workspaceItems = [
   { name: "Beranda", href: "/", icon: LayoutDashboard },
@@ -145,8 +146,9 @@ export function MobileNav() {
             </div>
 
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-4 py-3 bg-gray-50/50 border-b border-gray-100">
+              <div className="px-4 py-3 bg-gray-50/50 border-b border-gray-100 flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Sistem</span>
+                <PWAInstallButton />
               </div>
               <div className="divide-y divide-gray-50">
                 <NavLink

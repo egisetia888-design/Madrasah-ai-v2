@@ -44,6 +44,15 @@ Bukan pivot produk — perbaikan integritas di atas fondasi yang sudah shipped d
 
 ## 7.2 Riwayat Perubahan (Changelog)
 
+### v1.1.2-beta (September 2026)
+* **Keandalan Eksekusi AI (AI Gateway Reliability)**:
+  - **Kalkulasi Timeout Dinamis**: Penerapan batas waktu dinamis pada level per-model untuk provider HCNSEC dan OpenRouter (`remainingTime * 0.9`), mencegah jeda mati yang panjang sekaligus mengoptimalkan sisa alokasi waktu pemrosesan.
+  - **Peningkatan Batas Waktu Global (Global Timeout Extension)**: Memperpanjang batas waktu generasi untuk rute berat seperti `/api/ai/generate-syllabus` (90 detik) dan `/api/ai/generate-flashcards` (80 detik) guna mengakomodasi proses sintesis yang lama tanpa interupsi *HTTP 500*.
+  - **Validasi Integritas JSON Internal**: Menambahkan filter pra-pengiriman (`cleanAndParseJson`) langsung di dalam antrean model failover. Apabila model AI mengembalikan format JSON yang rusak/terpotong (*truncated*), sistem secara otomatis menolak dan memanggil model cadangan di lapis berikutnya.
+* **Lapisan Notifikasi Global (Global Error Boundary & Toaster)**:
+  - Mengimplementasikan `ErrorBoundary` level atas di `main.tsx` untuk menangkap kerusakan (*crash*) komponen antarmuka, menyajikan layar pemulihan ramah-pengguna yang menampakkan detail *stack trace* kode.
+  - Mengintegrasikan pencegat kejadian global (`window.onerror`, `window.unhandledrejection`) dipadukan dengan notifikasi pustaka `sonner`. Setiap kesalahan *runtime* atau API yang gagal (termasuk kegagalan timeout AI) kini akan langsung muncul sebagai *toast popup* peringatan dengan jejak pelacakan (trace), meminimalisir proses penelusuran masalah (debugging) yang bersembunyi di konsol peramban.
+
 ### v1.1.1-beta (September 2026)
 * **Ekspor Literer Studio Menulis**:
   - Menyediakan menu aksi dropdown "Ekspor" di bilah atas `WritingDetailPage.tsx`.

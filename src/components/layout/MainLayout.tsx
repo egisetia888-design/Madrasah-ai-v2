@@ -12,6 +12,7 @@ import { Search } from "lucide-react"
 import { useUIStore } from "../../store/uiStore"
 import { Toaster } from "../ui/Toaster"
 import { SyncConflictManager } from "../SyncConflictManager"
+import { OfflineIndicator } from "../OfflineIndicator"
 
 export function MainLayout() {
   const searchOpen = useUIStore(state => state.searchOpen)
@@ -87,6 +88,7 @@ export function MainLayout() {
       <ShortcutGuide />
       <AboutDialog />
       <Toaster />
+      <OfflineIndicator />
     </div>
   )
 }

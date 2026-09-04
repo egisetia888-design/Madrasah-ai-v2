@@ -38,6 +38,7 @@ Aplikasi klien dibangun menggunakan **React 18+** dan dikompilasi menggunakan **
 - **Keringanan & Kepatuhan**: Zustand tidak memerlukan pembungkus *Provider* berlebih, meminimalkan rendering ulang yang tidak perlu.
 - **Dual Persistence Strategy**: Data disimpan langsung di peramban menggunakan `localStorage` untuk kecepatan instan, dan dapat disinkronkan secara mulus ke cloud Firestore untuk keamanan jangka panjang.
 - **Ergonomi Sentuh & Responsivitas**: Dilengkapi dengan hook penanganan gesture sentuh dan bilah tab gulir bebas hambatan (`no-scrollbar`).
+- **Ketahanan Fatal & Notifikasi (Resilience & Toast)**: Dilengkapi dengan `ErrorBoundary` level akar dan pencegat kejadian *runtime* global via pustaka *toast* `sonner` untuk menampilkan jejak *error* transparan kepada pengguna tanpa memecah konsol peramban secara sunyi.
 
 ### 2. Sisi Server (Backend Gateway)
 Server backend menggunakan **Express.js** yang berjalan di Node.js. Server ini memiliki tanggung jawab krusial:

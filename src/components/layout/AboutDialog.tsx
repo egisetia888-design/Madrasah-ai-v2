@@ -38,11 +38,11 @@ export function AboutDialog() {
           <div className="w-full grid grid-cols-2 gap-4 py-4 border-y border-gray-50">
             <div className="text-center">
               <p className="text-[10px] text-gray-400 font-medium mb-1">Versi</p>
-              <p className="text-sm font-semibold text-gray-900">v1.0.0-beta</p>
+              <p className="text-sm font-semibold text-gray-900 font-mono">v1.1.2-beta</p>
             </div>
             <div className="text-center">
               <p className="text-[10px] text-gray-400 font-medium mb-1">Kreator</p>
-              <p className="text-sm font-semibold text-gray-900">egiistw88</p>
+              <p className="text-sm font-semibold text-gray-900">Egi Setia</p>
             </div>
           </div>
 

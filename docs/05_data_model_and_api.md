@@ -227,26 +227,27 @@ Server backend (`server.ts`) mengekspos 7 endpoint fungsional khusus untuk mempr
 Untuk melindungi infrastruktur server serta menghemat biaya konsumsi API pihak ketiga, server Express.js di Madrasah dilengkapi tiga lapisan proteksi internal:
 
 ### 1. Gateway Penyedia AI Cerdas Mandiri (HCNSEC, OpenRouter, & Fallback Terakhir)
-Server backend secara terstruktur memprioritaskan penyedia AI mandiri non-Gemini melalui fungsi `executeAIRequest`:
+Server backend secara terstruktur memprioritaskan penyedia AI mandiri non-Gemini melalui fungsi `executeAIRequest` dengan sistem **Peralihan Mulus (Seamless Failover)** dan **Validasi Ketat**:
 1. **Tier 1 — Provider Utama (HCNSEC / OpenAI-Compatible Provider)**:
    - Membaca `HCNSEC_API_KEY` (atau fallback ke kredensial OpenAI).
    - Format endpoint otomatis dinormalisasi ke `/chat/completions`.
-   - Urutan model kandidat adaptif: Memprioritaskan model aktif responsif (`Qwen3.8-27B`, `DeepSeek-V4-Pro`) dengan batas waktu per-model realistis (15–25 detik) untuk memberikan waktu yang memadai bagi generasi sintesis konseptual dan JSON kompleks tanpa mengalami *operation aborted*, dengan failover otomatis ke model kandidat berikutnya jika model pertama gagal.
+   - Urutan model kandidat adaptif: Memprioritaskan model aktif responsif (`Qwen3.8-27B`, `DeepSeek-V4-Pro`).
+   - **Kalkulasi Timeout Dinamis**: Memberikan sisa waktu proporsional (hingga 90% dari sisa waktu total maksimum) kepada model untuk menyelesaikan instruksi kompleks.
 2. **Tier 2 — Provider Sekunder (OpenRouter Multi-Model Failover)**:
    - Membaca `OPENROUTER_API_KEY`.
-   - Menggunakan failover multi-model teruji (`deepseek/deepseek-chat`, `qwen/qwen-2.5-72b-instruct`, `google/gemini-3.8-flash`, `google/gemini-2.5-flash`) dengan batas waktu per-model 12–20 detik dan batasan token ketat.
+   - Menggunakan failover multi-model teruji (`deepseek/deepseek-chat`, `qwen/qwen-2.5-72b-instruct`, dll) jika model di Tier 1 tidak merespons tepat waktu atau mengembalikan output cacat.
 3. **Tier 3 — Cadangan Terakhir (Google GenAI SDK)**:
-   - Berfungsi murni sebagai jaring pengaman (*last-resort safety net*) apabila seluruh penyedia mandiri tidak dapat dihubungi atau kehabisan kuota secara bersamaan.
+   - Berfungsi murni sebagai jaring pengaman (*last-resort safety net*).
 
 ### 2. Formula Khusus per Fitur AI (Specialized Prompts & Parameters)
-Setiap endpoint API kini dilengkapi formula parameter unik (temperatur, batasan token, dan instruksi sistem terkalibrasi):
-- **/api/ai/zettelkasten**: Formula Sintesis Ta'dib (Temp 0.25, MaxTokens 1200) — Menganalisis relasi semantik, asal-usul (*provenance*), dan celah epistemik secara objektif tanpa bumbu basa-basi.
-- **/api/ai/suggest-tags**: Formula Taksonomi Presisi (Temp 0.1, MaxTokens 350) — Menghasilkan 3–5 kata kunci ringkas, 1 ikon Lucide yang valid secara deterministik, dan tautan relevan.
-- **/api/ai/generate-flashcards**: Formula Active Recall MIP (Temp 0.2, MaxTokens 1000) — Menerapkan *Minimum Information Principle* (1 konsep per kartu, 1–3 kalimat jawaban padat).
-- **/api/ai/grade-flashcard**: Formula Penilaian Semantik SM-2 (Temp 0.0, MaxTokens 300) — Mengukur keselarasan makna konseptual (skala SuperMemo 0–5) secara deterministik dan objektif.
-- **/api/ai/generate-syllabus**: Formula Taksonomi Bloom Berjenjang (Temp 0.25, MaxTokens 1600) — Menghasilkan 3–4 fase belajar berurutan (Fondasi -> Metode -> Sintesis/Implementasi) dengan capaian terukur.
-- **/api/ai/summarize-literature**: Formula Tiga Pilar Telaah Akademik (Temp 0.15, MaxTokens 800) — Mengekstrak Masalah Utama, Metodologi, dan Kesimpulan secara tajam.
-- **/api/ai/book-info**: Formula Estimasi Bibliografi (Temp 0.0, MaxTokens 250) — Sumber data utama Open Library API, dengan fallback AI estimasi halaman rasional jika buku tidak ditemukan di basis data publik.
+Setiap endpoint API kini dilengkapi formula parameter unik (temperatur, batasan token, instruksi sistem terkalibrasi, dan **timeout maksimum global**):
+- **/api/ai/zettelkasten**: Formula Sintesis Ta'dib (Temp 0.25, MaxTokens 1200, Timeout 45s).
+- **/api/ai/suggest-tags**: Formula Taksonomi Presisi (Temp 0.1, MaxTokens 350, Timeout 45s).
+- **/api/ai/generate-flashcards**: Formula Active Recall MIP (Temp 0.2, MaxTokens 1000). **Timeout Diperpanjang: 80 detik** untuk mengakomodasi ekstrasi teks yang panjang.
+- **/api/ai/grade-flashcard**: Formula Penilaian Semantik SM-2 (Temp 0.0, MaxTokens 300, Timeout 45s).
+- **/api/ai/generate-syllabus**: Formula Taksonomi Bloom Berjenjang (Temp 0.25, MaxTokens 1600). **Timeout Diperpanjang: 90 detik** karena kompleksitas generasi kurikulum yang padat.
+- **/api/ai/summarize-literature**: Formula Tiga Pilar Telaah Akademik (Temp 0.15, MaxTokens 800, Timeout 45s).
+- **/api/ai/book-info**: Formula Estimasi Bibliografi (Temp 0.0, MaxTokens 250, Timeout 45s).
 
 ### 3. Pembatasan Frekuensi (Rate Limiting)
 - **API Limiter Umum** (`/api/*`): Membatasi setiap alamat IP pengguna maksimal 100 panggilan dalam jendela waktu 15 menit.

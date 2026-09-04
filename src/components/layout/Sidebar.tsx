@@ -5,6 +5,7 @@ import { useUIStore } from "../../store/uiStore"
 import { useAuthStore } from "../../store/authStore"
 import { useNotesStore } from "../../store/notesStore"
 import { useWritingStore } from "../../store/writingStore"
+import { PWAInstallButton } from "../PWAInstallButton"
 
 const workspaceItems = [
   { name: "Beranda", href: "/", icon: LayoutDashboard },
@@ -106,6 +107,9 @@ export function Sidebar() {
       </nav>
 
       <div className="mt-6 pt-4 border-t border-gray-100 space-y-0.5">
+        <div className="px-3 py-2">
+          <PWAInstallButton />
+        </div>
         <button
           onClick={() => useUIStore.getState().setShortcutGuideOpen(true)}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors text-left"
