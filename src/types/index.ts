@@ -183,6 +183,8 @@ export interface Edge {
   target: UUID;
   label?: string;
   verifiedBySystem?: boolean;
+  confidenceScore?: number;
+  createdBy?: RelationCreator;
 }
 
 export type RelationType = 'supports' | 'contradicts' | 'expands_on' | 'defines' | 'is_a' | 'part_of' | 'references' | 'applies';

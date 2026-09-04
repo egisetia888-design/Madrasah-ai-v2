@@ -239,9 +239,25 @@ export function KnowledgeGraphPage() {
         if (d.label === 'expands_on') return markerColors.expands_on;
         return "#e5e7eb";
       })
-      .attr("stroke-opacity", (d: any) => d.verifiedBySystem === false ? 0.3 : 0.6)
-      .attr("stroke-width", (d: any) => d.label ? 2 : 1.5)
-      .attr("stroke-dasharray", (d: any) => d.verifiedBySystem === false ? "4,4" : "none")
+      .attr("stroke-opacity", (d: any) => {
+        if (d.createdBy === 'ai_agent' && !d.verifiedBySystem) {
+          const score = typeof d.confidenceScore === 'number' ? d.confidenceScore : 0.7;
+          return Math.max(0.25, score * 0.45);
+        }
+        return 0.7;
+      })
+      .attr("stroke-width", (d: any) => {
+        if (d.createdBy === 'ai_agent' && !d.verifiedBySystem) {
+          return 1.2;
+        }
+        return d.label ? 2 : 1.5;
+      })
+      .attr("stroke-dasharray", (d: any) => {
+        if (d.createdBy === 'ai_agent' && !d.verifiedBySystem) {
+          return "4,4";
+        }
+        return "none";
+      })
       .attr("marker-end", (d: any) => {
         if (d.label === 'contradicts') return `url(#arrowhead-contradicts)`;
         if (d.label === 'supports') return `url(#arrowhead-supports)`;

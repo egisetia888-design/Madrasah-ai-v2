@@ -118,3 +118,7 @@ Studio penulisan kreatif dengan pipa penerbitan 5-tahap.
   - **Fokus Sunyi & Penghitung Kata**: Editor Markdown minim gangguan dengan metrik jumlah kata dan estimasi waktu membaca secara langsung.
   - **Live Detected Entities & Auto-Linking**: Panel samping (*ContextualSidebar*) mendeteksi entitas konsep, buku, dan catatan secara langsung (*real-time*), memungkinkan penyisipan sintaks `[[WikiLink]]` satu sentuhan dan penautan otomatis ke graf saat draf disimpan.
   - **Integrasi Referensi Otak Kedua**: Mempermudah pengguna meninjau ulang catatan penting di Otak Kedua tanpa perlu keluar dari studio menulis.
+  - **Ekspor Literer Multi-Format**: Menu aksi ekspor terintegrasi yang mendukung:
+    - *Salin Markdown*: Menyalin konten beserta metadata Frontmatter YAML (`title`, `status`, `tags`, `words`, `created`, `updated`) ke papan klip.
+    - *Unduh Berkas (.md)*: Mengunduh draf tulisan sebagai berkas teks murni Markdown lokal.
+    - *Cetak Bersih / PDF*: Lembar gaya `@media print` khusus yang menghilangkan bilah navigasi, bilah sisi, tombol aksi, dan kontrol interaktif, menghasilkan dokumen esai siap cetak atau simpan ke PDF yang rapi dan elegan.

@@ -1,4 +1,4 @@
-﻿import Markdown from "react-markdown"
+import Markdown from "react-markdown"
 import { Sparkles, Brain } from "lucide-react"
 import { Button } from "../../../components/ui/Button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../../components/ui/Dialog"
@@ -38,8 +38,13 @@ export function AIAssistantDialog({
 
         <div className="flex-1 overflow-y-auto min-h-[200px] border border-gray-100 rounded-2xl bg-gray-50/50 p-4">
           {aiResponse ? (
-            <div className="prose prose-sm md:prose-base prose-gray max-w-none text-gray-700">
-              <Markdown>{aiResponse}</Markdown>
+            <div className="space-y-4">
+              <div className="prose prose-sm md:prose-base prose-gray max-w-none text-gray-700">
+                <Markdown>{aiResponse}</Markdown>
+              </div>
+              <p className="text-[11px] text-gray-500 font-mono pt-3 border-t border-gray-200">
+                Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+              </p>
             </div>
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 space-y-3 py-10">

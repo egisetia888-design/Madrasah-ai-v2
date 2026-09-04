@@ -226,7 +226,7 @@ export function NoteDetailPage() {
       if (decks.length > 0) {
         targetDeckId = decks[0].id;
       } else {
-        alert("Pilih atau buat deck terlebih dahulu.");
+        addToast({ type: 'error', message: "Pilih atau buat dek kartu flash terlebih dahulu." });
         return;
       }
     }
@@ -409,6 +409,9 @@ export function NoteDetailPage() {
                 ))}
               </div>
             </div>
+            <p className="text-[11px] text-gray-500 font-mono mt-3">
+              Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+            </p>
           </div>
         )}
 
@@ -805,6 +808,10 @@ export function NoteDetailPage() {
                   </div>
                 ))}
               </div>
+              
+              <p className="text-[11px] text-gray-500 font-mono">
+                Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+              </p>
               
               <div className="space-y-2 pt-2 border-t border-gray-100">
                 <label className="text-sm font-medium text-gray-700">Simpan ke Deck</label>

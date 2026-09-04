@@ -1,14 +1,18 @@
 import { auth } from './firebase';
 
 export async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-  const user = auth.currentUser;
-  if (!user) {
-    throw new Error('User not authenticated');
+  const user = auth?.currentUser;
+  let headers: HeadersInit = { ...options.headers };
+  if (user) {
+    try {
+      const token = await user.getIdToken();
+      headers = {
+        ...headers,
+        'Authorization': `Bearer ${token}`,
+      };
+    } catch (err) {
+      console.warn('Gagal mengambil token pengguna:', err);
+    }
   }
-  const token = await user.getIdToken();
-  const headers = {
-    ...options.headers,
-    'Authorization': `Bearer ${token}`,
-  };
   return fetch(url, { ...options, headers });
 }

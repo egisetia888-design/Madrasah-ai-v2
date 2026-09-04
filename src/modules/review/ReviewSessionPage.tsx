@@ -144,6 +144,9 @@ export function ReviewSessionPage() {
                     <span className="font-semibold">Penilaian AI (Kualitas: {evaluationResult.quality}/5)</span>
                   </div>
                   <p>{evaluationResult.feedback}</p>
+                  <p className="text-[11px] text-gray-500 font-mono mt-2 pt-2 border-t border-gray-200">
+                    Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+                  </p>
                 </div>
               )}
               {isEvaluating && (

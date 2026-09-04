@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { fetchWithAuth } from "../../lib/api"
 import { Button } from "../../components/ui/Button"
 import { Plus, Sparkles, Filter, Zap } from "lucide-react"
 import { useNotesStore } from "../../store/notesStore"
@@ -188,7 +189,7 @@ export function NotesPage() {
     const toastId = addToast({ type: 'loading', message: 'AI sedang menganalisis saran tag...' });
     try {
       const { concepts } = useKnowledgeStore.getState();
-      const res = await fetch("/api/ai/suggest-tags", {
+      const res = await fetchWithAuth("/api/ai/suggest-tags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content, notes, concepts }),
@@ -227,7 +228,7 @@ export function NotesPage() {
     try {
       const { concepts, sourceFragments, relations } = useKnowledgeStore.getState();
 
-      const res = await fetch("/api/ai/zettelkasten", {
+      const res = await fetchWithAuth("/api/ai/zettelkasten", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, notes, concepts, fragments: sourceFragments, relations }),

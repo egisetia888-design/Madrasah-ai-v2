@@ -1,4 +1,4 @@
-﻿import React, { Component, ErrorInfo, ReactNode } from "react";
+import React, { Component, ErrorInfo, ReactNode } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 
 interface Props {
@@ -47,6 +47,18 @@ export class ErrorBoundary extends Component<Props, State> {
                 {this.props.fallbackMessage || "Terjadi kesalahan tak terduga. Data Anda aman tersimpan secara lokal."}
               </p>
             </div>
+
+            {this.state.error && (
+              <div className="bg-gray-50 rounded-xl p-4 text-left border border-gray-200 overflow-x-auto">
+                <p className="text-sm font-mono text-gray-900 font-semibold mb-1">Error Details:</p>
+                <p className="text-xs font-mono text-red-600 mb-2">{this.state.error.toString()}</p>
+                {this.state.error.stack && (
+                  <pre className="text-[10px] font-mono text-gray-500 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                    {this.state.error.stack}
+                  </pre>
+                )}
+              </div>
+            )}
 
             <div className="pt-4">
               <button

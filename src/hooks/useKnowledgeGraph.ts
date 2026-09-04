@@ -7,7 +7,7 @@ import { useLibraryStore } from "../store/libraryStore";
 import { useKnowledgeStore } from "../store/knowledgeStore";
 import { useCurriculumStore } from "../store/curriculumStore";
 import { useReviewStore } from "../store/reviewStore";
-import { Node, Edge, Relation } from "../types";
+import { Node, Edge, Relation, RelationCreator } from "../types";
 import { scanTextForEntities } from "../utils/autoLinker";
 
 export function useKnowledgeGraph() {
@@ -40,11 +40,18 @@ export function useKnowledgeGraph() {
       }
     };
 
-    const addEdgeIfMissing = (source: string, target: string, label: string, verifiedBySystem: boolean = true) => {
+    const addEdgeIfMissing = (
+      source: string,
+      target: string,
+      label: string,
+      verifiedBySystem: boolean = true,
+      confidenceScore: number = 1,
+      createdBy: RelationCreator = 'user'
+    ) => {
       const edgeId = `${source}-${target}`;
       if (!edgeSet.has(edgeId)) {
         edgeSet.add(edgeId);
-        edges.push({ id: edgeId, source, target, label, verifiedBySystem });
+        edges.push({ id: edgeId, source, target, label, verifiedBySystem, confidenceScore, createdBy });
       }
     };
 
@@ -89,7 +96,7 @@ export function useKnowledgeGraph() {
 
     // 2. Add explicit stored relations
     relations.forEach(rel => {
-      addEdgeIfMissing(rel.sourceNodeId, rel.targetNodeId, rel.relationType, rel.verifiedBySystem);
+      addEdgeIfMissing(rel.sourceNodeId, rel.targetNodeId, rel.relationType, rel.verifiedBySystem, rel.confidenceScore, rel.createdBy);
     });
 
     // 3. Extract automatic structural and text mentions

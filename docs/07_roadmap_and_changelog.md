@@ -20,15 +20,15 @@ Pengembangan **Madrasah — Personal Knowledge Operating System** dibagi ke dala
 Bukan pivot produk — perbaikan integritas di atas fondasi yang sudah shipped di Fase 1. Rincian lengkap: `docs/10_tadib_layer_prd.md` dan `docs/11_reading_reflection_connecting_prd.md`.
 
 **A. Lapisan Ta'dib (Provenance & Kejujuran Epistemik AI)**
-- [ ] **Fase 0 — FR1**: Perbaiki default `verifiedBySystem: true` yang di-hardcode di `autoLinker.ts` (baris ~336, ~495) untuk relasi `createdBy: 'ai_agent'`. Ini bug integritas data, disetujui, belum dieksekusi di kode.
-- [ ] **Fase 1 — FR2+FR3**: Komponen `ProvenanceBadge` + aksi "Konfirmasi" satu-ketuk (tanpa dialog/formulir, sesuai prinsip Gesekan Minimal di §1.4). Menunggu Fase 0.
-- [ ] **Fase 2 — FR4+FR5**: Field `epistemicDomain` (`umum` / `akidah` / `fiqih` / `tasawuf` / `sejarah`) + disclaimer konsisten di setiap output AI Copilot. Menunggu checkpoint pemakaian 2 minggu setelah Fase 1 berjalan — belum tentu dikerjakan sekarang.
+- [x] **Fase 0 — FR1**: Perbaiki default `verifiedBySystem: true` yang di-hardcode di `autoLinker.ts` untuk relasi `createdBy: 'ai_agent'`. Nilai sekarang default `false`, hanya `true` jika diverifikasi manusia atau relasi struktural pengguna. (Selesai dan terverifikasi di kode).
+- [x] **Fase 1 — FR2+FR3**: Komponen `ProvenanceBadge` + aksi "Konfirmasi" satu-ketuk (tanpa dialog/formulir, sesuai prinsip Gesekan Minimal di §1.4). Terintegrasi di `NoteDetailPage.tsx`, `ConceptsPage.tsx`, serta pembedaan visual garis relasi unverified AI pada `KnowledgeGraphPage.tsx`. (Selesai dan terverifikasi di kode).
+- [x] **Fase 2 — FR4+FR5**: Field `epistemicDomain` (`umum` / `akidah` / `fiqih` / `tasawuf` / `sejarah`) + disclaimer konsisten "Hasil AI — periksa ke sumber sebelum dijadikan pegangan." di setiap output AI Copilot (`CurriculumPage.tsx`, `ReviewSessionPage.tsx`, `ConceptsPage.tsx`, `NoteDetailPage.tsx`, `BookDetailPage.tsx`, `LibraryPage.tsx`, `AIAssistantDialog.tsx`). (Selesai dan terverifikasi di kode).
 - [ ] **Fase 3 — Jalur Validasi Ulama**: Di luar cakupan PRD saat ini. Gerbang wajib sebelum Madrasah dibuka untuk pengguna selain Anda sendiri.
 
 **B. Fondasi Baca–Berpikir–Refleksi–Menyambungkan**
-- [ ] **Panel catatan/konsep belum terhubung**: Kueri pasif atas relasi berjumlah 0–1; murni tampilan, tanpa langkah interaksi tambahan.
-- [ ] **Resurfacing mingguan**: Catatan `processed` yang tidak disentuh selama N hari dimunculkan ulang untuk direnungkan.
-- [ ] **Aksi konfirmasi (di atas)**: Dipakai ulang, bukan ditambah baru, sebagai satu-satunya titik gesekan yang disengaja di seluruh alur ini.
+- [x] **Panel catatan/konsep belum terhubung**: Kueri pasif atas relasi berjumlah 0–1; tampil di kartu "Belum Terhubung" pada `DashboardPage.tsx` (baris ~252-269), murni tampilan tanpa langkah interaksi tambahan. (Selesai dan terverifikasi di kode).
+- [x] **Resurfacing mingguan**: Catatan `processed` yang tidak disentuh selama >14 hari dimunculkan sebagai kartu "Resurfacing Mingguan" pada `DashboardPage.tsx` (baris ~272-289) dengan rotasi bergilir mingguan. (Selesai dan terverifikasi di kode).
+- [x] **Aksi konfirmasi (di atas)**: Memakai ulang komponen `ProvenanceBadge` sebagai satu-satunya titik gesekan sadar satu-sentuhan tanpa modal berlebih. (Selesai dan terverifikasi di kode).
 
 ### Fase 2: Sinkronisasi Awan & Autentikasi Multi-User (Jangka Menengah)
 - [ ] **Multi-User Authentication**: Integrasi Firebase Auth untuk mendukung pendaftaran dan login aman banyak pengguna secara terisolasi.
@@ -36,7 +36,7 @@ Bukan pivot produk — perbaikan integritas di atas fondasi yang sudah shipped d
 - [ ] **Sinkronisasi Multidevice Real-Time**: Pembaruan data instan antara sesi desktop aktif dan smartphone tanpa keterlambatan.
 
 ### Fase 3: Kolaborasi, Ekspor Literer, dan Ekosistem Penerbitan (Jangka Panjang)
-- [ ] **Ekspor Format Kaya**: Ekspor draf tulisan dari Studio Menulis langsung ke format publikasi akademis seperti PDF (LaTeX-ready), EPUB, atau bundel Markdown .zip.
+- [x] **Ekspor Format Kaya**: Ekspor draf tulisan dari Studio Menulis langsung ke format Markdown lengkap dengan Frontmatter YAML, unduh berkas `.md`, serta Cetak / Simpan PDF bersih menggunakan lembar gaya cetak `@media print` tanpa chrome UI. (Selesai dan terverifikasi di kode).
 - [ ] **Pustaka Kolaboratif (Shared Curriculums)**: Pengguna dapat membagikan silabus belajar dan daftar rujukan pustaka mereka ke publik untuk dipelajari bersama.
 - [ ] **API Penerbitan Pihak Ketiga**: Integrasi ekspor tulisan langsung ke platform penerbitan mandiri seperti Ghost, Medium, atau repositori tulisan personal via Webhooks.
 
@@ -44,7 +44,27 @@ Bukan pivot produk — perbaikan integritas di atas fondasi yang sudah shipped d
 
 ## 7.2 Riwayat Perubahan (Changelog)
 
-### v1.0.0-beta (Rilis Terkini — Agustus 2026)
+### v1.1.1-beta (September 2026)
+* **Ekspor Literer Studio Menulis**:
+  - Menyediakan menu aksi dropdown "Ekspor" di bilah atas `WritingDetailPage.tsx`.
+  - Opsi *Salin Markdown*: Menghasilkan teks Markdown lengkap dengan Frontmatter YAML (`title`, `status`, `tags`, `words`, `created`, `updated`) ke papan klip (*clipboard*).
+  - Opsi *Unduh Berkas (.md)*: Mengunduh draf tulisan secara instan ke sistem berkas lokal via Blob dan library `file-saver`.
+  - Opsi *Cetak / Simpan PDF*: Memanfaatkan fitur cetak browser asli dengan lembar gaya `@media print` khusus (`src/index.css`) yang menyembunyikan navigasi, bilah sisi, tombol aksi, dan dialog, serta memformat tipografi esai secara bersih dan elegan.
+* **Audit & Standarisasi Pintu Gerbang AI (AI Client Gateway Audit)**:
+  - Menstandarkan 100% pemanggilan endpoint API kecerdasan buatan (`/api/ai/*`) di seluruh modul aplikasi (`NotesPage.tsx`, `NoteDetailPage.tsx`, `WritingDetailPage.tsx`, `LibraryPage.tsx`, `BookDetailPage.tsx`, `ConceptsPage.tsx`, `ReviewSessionPage.tsx`, `CurriculumPage.tsx`) untuk memakai utilitas `fetchWithAuth`.
+  - Memperbaiki penanganan otentikasi dan kegagalan panggilan jaringan secara terpusat dengan notifikasi `toast` interaktif.
+  - Memastikan teks penafian epistemik *"Hasil AI — periksa ke sumber sebelum dijadikan pegangan."* hadir pada seluruh komponen keluaran AI (`WritingDetailPage.tsx`, `AddNoteDialog.tsx`, `AIAssistantDialog.tsx`, `BookDetailPage.tsx`, `ConceptsPage.tsx`, `ReviewSessionPage.tsx`, `CurriculumPage.tsx`).
+  - Mengganti dialog primitif `alert()` pada `NoteDetailPage.tsx` dengan komponen notifikasi `toast` sistem.
+
+### v1.1.0-beta (September 2026)
+* **Penyempurnaan Lapisan Ta'dib & Integritas Epistemik AI**:
+  - **Integritas Provenance Relasi**: Mengoreksi pembuatan relasi oleh `autoLinker.ts` agar relasi yang dihasilkan AI (`createdBy: 'ai_agent'`) memiliki `verifiedBySystem: false` secara jujur tanpa rekayasa flag.
+  - **Penyematan ProvenanceBadge & Aksi 1-Ketuk**: Menyematkan komponen `ProvenanceBadge` di kartu konsep (`ConceptsPage.tsx`) dan catatan (`NoteDetailPage.tsx`) dengan kemampuan verifikasi instan satu-sentuhan tanpa hambatan modal dialog.
+  - **Pembedaan Visual Graf Pengetahuan**: Sisi (*edge*) relasi AI yang belum diverifikasi digambar dengan garis putus-putus (*dashed line*) dan opasitas yang diturunkan secara proporsional sesuai skor keyakinan (*confidence score*) di graf D3.js (`KnowledgeGraphPage.tsx`).
+  - **Disclaimer Epistemik Standar**: Menyematkan teks baku *"Hasil AI — periksa ke sumber sebelum dijadikan pegangan."* pada seluruh permukaan keluaran AI (`CurriculumPage.tsx`, `ReviewSessionPage.tsx`, `ConceptsPage.tsx`, `NoteDetailPage.tsx`, `BookDetailPage.tsx`, `LibraryPage.tsx`, `AIAssistantDialog.tsx`).
+  - **Penyaringan Konsep Terverifikasi**: Menambahkan kontrol filter "Hanya Terverifikasi Manual" di halaman Manajemen Konsep.
+
+### v1.0.0-beta (Agustus 2026)
 * **Kreator & Identitas Resmi**:
   - Dikelola oleh **egiistw88** dengan identitas resmi *Madrasah — Personal Knowledge OS*.
   - Penyajian modal informasi sistem terpadu (**AboutDialog**) dengan metadata versi, kreator, dan kutipan filosofis.

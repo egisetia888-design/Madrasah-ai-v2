@@ -1,5 +1,5 @@
 import { doc, setDoc, deleteDoc, onSnapshot, collection, query, where, runTransaction } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { db, auth, isFirebaseConfigured, handleFirestoreError, OperationType } from './firebase';
 import { Note, Draft, Project, Book, SyncMetadata, Concept, SourceFragment, Relation, LearningPath, Phase, Competency, Deck, Flashcard } from '../types';
 import { useNotesStore } from '../store/notesStore';
 import { useWritingStore } from '../store/writingStore';
@@ -46,6 +46,12 @@ function mergeCloudData<T extends { id: string } & SyncMetadata>(
 }
 
 export function initFirestoreSync() {
+  if (!isFirebaseConfigured || !auth || !db) {
+    return;
+  }
+  const firebaseAuth = auth;
+  const firestoreDb = db;
+
   let unsubscribeNotes: (() => void) | null = null;
   let unsubscribeDrafts: (() => void) | null = null;
   let unsubscribeProjects: (() => void) | null = null;
@@ -59,7 +65,7 @@ export function initFirestoreSync() {
   let unsubscribeDecks: (() => void) | null = null;
   let unsubscribeFlashcards: (() => void) | null = null;
 
-  auth.onAuthStateChanged((user) => {
+  firebaseAuth.onAuthStateChanged((user) => {
     if (unsubscribeNotes) unsubscribeNotes();
     if (unsubscribeDrafts) unsubscribeDrafts();
     if (unsubscribeProjects) unsubscribeProjects();
@@ -79,7 +85,7 @@ export function initFirestoreSync() {
       storeSetter: (merged: T[]) => void,
       storeGetter: () => T[]
     ) => {
-      const q = query(collection(db, collectionName), where('userId', '==', user.uid));
+      const q = query(collection(firestoreDb, collectionName), where('userId', '==', user.uid));
       return onSnapshot(
         q,
         (snapshot) => {
@@ -144,19 +150,21 @@ export function initFirestoreSync() {
   });
 }
 
-// Transaction helper for OCC
+// Helper untuk OCC
 async function syncWithOCC<T extends { id: string } & SyncMetadata>(
   collectionName: string,
   item: T,
   setStateCallback: (id: string, updates: Partial<T>) => void
 ) {
+  if (!isFirebaseConfigured || !auth || !db) return;
   const user = auth.currentUser;
   if (!user) return;
   const path = `${collectionName}/${item.id}`;
+  const firestoreDb = db;
 
   try {
-    await runTransaction(db, async (transaction) => {
-      const docRef = doc(db, collectionName, item.id);
+    await runTransaction(firestoreDb, async (transaction) => {
+      const docRef = doc(firestoreDb, collectionName, item.id);
       const docSnap = await transaction.get(docRef);
       if (docSnap.exists()) {
         const cloudData = docSnap.data() as T;
@@ -185,6 +193,18 @@ async function syncWithOCC<T extends { id: string } & SyncMetadata>(
   }
 }
 
+async function syncDeleteWithDoc(collectionName: string, id: string) {
+  if (!isFirebaseConfigured || !auth || !db) return;
+  const user = auth.currentUser;
+  if (!user) return;
+  const firestoreDb = db;
+  try {
+    await deleteDoc(doc(firestoreDb, collectionName, id));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `${collectionName}/${id}`);
+  }
+}
+
 export async function syncSaveNote(note: Note) {
   await syncWithOCC('notes', note, (id, updates) => {
     useNotesStore.setState(state => ({
@@ -194,13 +214,7 @@ export async function syncSaveNote(note: Note) {
 }
 
 export async function syncDeleteNote(noteId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'notes', noteId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `notes/${noteId}`);
-  }
+  await syncDeleteWithDoc('notes', noteId);
 }
 
 export async function syncSaveDraft(draft: Draft) {
@@ -212,13 +226,7 @@ export async function syncSaveDraft(draft: Draft) {
 }
 
 export async function syncDeleteDraft(draftId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'drafts', draftId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `drafts/${draftId}`);
-  }
+  await syncDeleteWithDoc('drafts', draftId);
 }
 
 export async function syncSaveProject(project: Project) {
@@ -230,13 +238,7 @@ export async function syncSaveProject(project: Project) {
 }
 
 export async function syncDeleteProject(projectId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'projects', projectId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `projects/${projectId}`);
-  }
+  await syncDeleteWithDoc('projects', projectId);
 }
 
 export async function syncSaveBook(book: Book) {
@@ -248,13 +250,7 @@ export async function syncSaveBook(book: Book) {
 }
 
 export async function syncDeleteBook(bookId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'books', bookId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `books/${bookId}`);
-  }
+  await syncDeleteWithDoc('books', bookId);
 }
 
 export async function syncSaveConcept(concept: Concept) {
@@ -266,13 +262,7 @@ export async function syncSaveConcept(concept: Concept) {
 }
 
 export async function syncDeleteConcept(conceptId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'concepts', conceptId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `concepts/${conceptId}`);
-  }
+  await syncDeleteWithDoc('concepts', conceptId);
 }
 
 export async function syncSaveSourceFragment(fragment: SourceFragment) {
@@ -284,13 +274,7 @@ export async function syncSaveSourceFragment(fragment: SourceFragment) {
 }
 
 export async function syncDeleteSourceFragment(fragmentId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'sourceFragments', fragmentId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `sourceFragments/${fragmentId}`);
-  }
+  await syncDeleteWithDoc('sourceFragments', fragmentId);
 }
 
 export async function syncSaveRelation(relation: Relation) {
@@ -302,13 +286,7 @@ export async function syncSaveRelation(relation: Relation) {
 }
 
 export async function syncDeleteRelation(relationId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'relations', relationId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `relations/${relationId}`);
-  }
+  await syncDeleteWithDoc('relations', relationId);
 }
 
 export async function syncSaveLearningPath(path: LearningPath) {
@@ -320,13 +298,7 @@ export async function syncSaveLearningPath(path: LearningPath) {
 }
 
 export async function syncDeleteLearningPath(pathId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'learningPaths', pathId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `learningPaths/${pathId}`);
-  }
+  await syncDeleteWithDoc('learningPaths', pathId);
 }
 
 export async function syncSavePhase(phase: Phase) {
@@ -338,13 +310,7 @@ export async function syncSavePhase(phase: Phase) {
 }
 
 export async function syncDeletePhase(phaseId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'phases', phaseId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `phases/${phaseId}`);
-  }
+  await syncDeleteWithDoc('phases', phaseId);
 }
 
 export async function syncSaveCompetency(competency: Competency) {
@@ -356,13 +322,7 @@ export async function syncSaveCompetency(competency: Competency) {
 }
 
 export async function syncDeleteCompetency(competencyId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'competencies', competencyId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `competencies/${competencyId}`);
-  }
+  await syncDeleteWithDoc('competencies', competencyId);
 }
 
 export async function syncSaveDeck(deck: Deck) {
@@ -374,13 +334,7 @@ export async function syncSaveDeck(deck: Deck) {
 }
 
 export async function syncDeleteDeck(deckId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'decks', deckId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `decks/${deckId}`);
-  }
+  await syncDeleteWithDoc('decks', deckId);
 }
 
 export async function syncSaveFlashcard(flashcard: Flashcard) {
@@ -392,11 +346,6 @@ export async function syncSaveFlashcard(flashcard: Flashcard) {
 }
 
 export async function syncDeleteFlashcard(flashcardId: string) {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await deleteDoc(doc(db, 'flashcards', flashcardId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `flashcards/${flashcardId}`);
-  }
+  await syncDeleteWithDoc('flashcards', flashcardId);
 }
+

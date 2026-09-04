@@ -1,36 +1,62 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAnalytics, isSupported, type Analytics } from 'firebase/analytics';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged, type User } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseAppletConfig from '../../firebase-applet-config.json';
+import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
+import { getFirestore, doc, getDocFromServer, type Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || (firebaseAppletConfig as any)?.apiKey || "",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || (firebaseAppletConfig as any)?.authDomain || "",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || (firebaseAppletConfig as any)?.projectId || "",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || (firebaseAppletConfig as any)?.storageBucket || "",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || (firebaseAppletConfig as any)?.messagingSenderId || "",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || (firebaseAppletConfig as any)?.appId || "",
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || (firebaseAppletConfig as any)?.measurementId || "",
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || (firebaseAppletConfig as any)?.firestoreDatabaseId || "(default)"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "",
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "(default)"
 };
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+export const isFirebaseConfigured: boolean = Boolean(
+  firebaseConfig.apiKey &&
+  typeof firebaseConfig.apiKey === 'string' &&
+  firebaseConfig.apiKey.trim() !== '' &&
+  firebaseConfig.apiKey !== '""' &&
+  !firebaseConfig.apiKey.includes('YOUR_') &&
+  firebaseConfig.projectId &&
+  firebaseConfig.projectId.trim() !== ''
+);
 
-const customDatabaseId = firebaseConfig.firestoreDatabaseId &&
-  firebaseConfig.firestoreDatabaseId !== '(default)' &&
-  firebaseConfig.firestoreDatabaseId.trim() !== ''
-    ? firebaseConfig.firestoreDatabaseId
-    : undefined;
+let app: FirebaseApp | null = null;
+let db: Firestore | null = null;
+let auth: Auth | null = null;
+let googleProvider: GoogleAuthProvider | null = null;
 
-export const db = customDatabaseId ? getFirestore(app, customDatabaseId) : getFirestore(app);
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
+if (isFirebaseConfigured) {
+  try {
+    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+
+    const customDatabaseId = firebaseConfig.firestoreDatabaseId &&
+      firebaseConfig.firestoreDatabaseId !== '(default)' &&
+      firebaseConfig.firestoreDatabaseId.trim() !== ''
+        ? firebaseConfig.firestoreDatabaseId
+        : undefined;
+
+    db = customDatabaseId ? getFirestore(app, customDatabaseId) : getFirestore(app);
+    auth = getAuth(app);
+    googleProvider = new GoogleAuthProvider();
+  } catch (err) {
+    console.warn('Gagal menginisialisasi Firebase SDK:', err);
+    app = null;
+    db = null;
+    auth = null;
+    googleProvider = null;
+  }
+}
+
+export { app, db, auth, googleProvider };
 
 export let analytics: Analytics | null = null;
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && app) {
   isSupported().then(yes => {
-    if (yes) {
+    if (yes && app) {
       try {
         analytics = getAnalytics(app);
       } catch (err) {
@@ -73,12 +99,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+      userId: auth?.currentUser?.uid,
+      email: auth?.currentUser?.email,
+      emailVerified: auth?.currentUser?.emailVerified,
+      isAnonymous: auth?.currentUser?.isAnonymous,
+      tenantId: auth?.currentUser?.tenantId,
+      providerInfo: auth?.currentUser?.providerData?.map(provider => ({
         providerId: provider.providerId,
         email: provider.email,
       })) || []
@@ -91,6 +117,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 export async function testConnection() {
+  if (!isFirebaseConfigured || !db) return;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
@@ -100,4 +127,6 @@ export async function testConnection() {
   }
 }
 
-testConnection();
+if (isFirebaseConfigured) {
+  testConnection();
+}

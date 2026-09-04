@@ -60,3 +60,22 @@ h1, h2, h3, h4, h5, h6 {
 .animation-delay-4000 {
   animation-delay: 4s;
 }
+
+@media print {
+  /* Hide UI navigation, action bars, and sidebars during printing */
+  nav, aside, header, .no-print, [role="dialog"], button, select {
+    display: none !important;
+  }
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+  .print-area {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+}

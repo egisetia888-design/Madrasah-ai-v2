@@ -1,17 +1,24 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { HardDrive } from "lucide-react"
 import { Button } from "../../components/ui/Button"
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card"
 import { useAuthStore } from "../../store/authStore"
+import { isFirebaseConfigured } from "../../lib/firebase"
 
 export function LoginPage() {
   const navigate = useNavigate()
   const loginWithGoogle = useAuthStore(state => state.loginWithGoogle)
+  const continueLocally = useAuthStore(state => state.continueLocally)
   
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
   const handleGoogleLogin = async () => {
+    if (!isFirebaseConfigured) {
+      setError("Firebase Cloud belum dikonfigurasi pada server ini. Silakan gunakan Mode Lokal.")
+      return
+    }
     setError(null)
     setIsLoading(true)
     try {
@@ -19,10 +26,15 @@ export function LoginPage() {
       navigate("/")
     } catch (err: any) {
       console.error("Auth error", err)
-      setError("Gagal masuk dengan Google. Silakan coba lagi.")
+      setError("Gagal masuk dengan Google. Silakan coba lagi atau gunakan Mode Lokal.")
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleContinueLocally = () => {
+    continueLocally()
+    navigate("/")
   }
 
   return (
@@ -42,7 +54,7 @@ export function LoginPage() {
         <CardContent className="pb-8 space-y-4">
           
           {error && (
-            <p className="text-sm text-red-600 font-medium bg-red-50 p-2 rounded-lg border border-red-100 text-center">
+            <p className="text-sm text-red-600 font-medium bg-red-50 p-2.5 rounded-lg border border-red-100 text-center">
               {error}
             </p>
           )}
@@ -60,7 +72,23 @@ export function LoginPage() {
               <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
               <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
             </svg>
-            {isLoading ? "Memproses..." : "Masuk dengan Google"}
+            {isLoading ? "Memproses..." : "Masuk dengan Google (Cloud)"}
+          </Button>
+
+          <div className="relative flex py-1 items-center">
+            <div className="flex-grow border-t border-gray-200"></div>
+            <span className="flex-shrink mx-3 text-xs text-gray-400">atau</span>
+            <div className="flex-grow border-t border-gray-200"></div>
+          </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full flex items-center justify-center gap-2 h-11 border border-dashed border-gray-300 rounded-xl text-gray-700 hover:text-gray-900 hover:bg-gray-50 text-sm font-medium"
+            onClick={handleContinueLocally}
+          >
+            <HardDrive className="w-4 h-4 text-gray-500" />
+            Lanjutkan dalam Mode Lokal (Offline)
           </Button>
           
         </CardContent>

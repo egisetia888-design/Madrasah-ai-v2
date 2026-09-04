@@ -1,5 +1,6 @@
 import { SyncStatusIndicator } from '../../components/ui/SyncStatusIndicator';
 import { useState, useMemo } from "react"
+import { fetchWithAuth } from "../../lib/api"
 import { useNavigate } from "react-router-dom"
 import { Button } from "../../components/ui/Button"
 import { Plus, Search, Book, MoreVertical, BookOpen, CheckCircle2, Bookmark, Flame, PenTool, ExternalLink, Filter, Sparkles, X } from "lucide-react"
@@ -40,7 +41,7 @@ export function LibraryPage() {
     const toastId = addToast({ type: 'loading', message: 'Mencari metadata buku via Open Library...' });
 
     try {
-      const res = await fetch("/api/ai/book-info", {
+      const res = await fetchWithAuth("/api/ai/book-info", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim(), author: authorName.trim() }),
@@ -322,7 +323,7 @@ export function LibraryPage() {
                     <label className="text-sm font-medium text-gray-700">Total Halaman</label>
                     {isEstimatedPages && totalPages && (
                       <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200">
-                        perkiraan
+                        perkiraan AI
                       </span>
                     )}
                   </div>
@@ -338,6 +339,11 @@ export function LibraryPage() {
                     </button>
                   )}
                 </div>
+                {isEstimatedPages && (
+                  <p className="text-[11px] text-gray-500 font-mono">
+                    Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+                  </p>
+                )}
                 <input
                   value={totalPages}
                   onChange={(e) => {

@@ -231,10 +231,10 @@ Server backend secara terstruktur memprioritaskan penyedia AI mandiri non-Gemini
 1. **Tier 1 — Provider Utama (HCNSEC / OpenAI-Compatible Provider)**:
    - Membaca `HCNSEC_API_KEY` (atau fallback ke kredensial OpenAI).
    - Format endpoint otomatis dinormalisasi ke `/chat/completions`.
-   - Urutan model kandidat adaptif: Memprioritaskan model aktif responsif (`Qwen3.8-27B`, `MiniMax-M3`) dengan batas waktu per-model pendek (4–8 detik) agar jika salah satu model gateway sedang lambat, sistem langsung berpindah ke model alternatif tanpa membuat pengguna menunggu lama.
+   - Urutan model kandidat adaptif: Memprioritaskan model aktif responsif (`Qwen3.8-27B`, `DeepSeek-V4-Pro`) dengan batas waktu per-model realistis (15–25 detik) untuk memberikan waktu yang memadai bagi generasi sintesis konseptual dan JSON kompleks tanpa mengalami *operation aborted*, dengan failover otomatis ke model kandidat berikutnya jika model pertama gagal.
 2. **Tier 2 — Provider Sekunder (OpenRouter Multi-Model Failover)**:
    - Membaca `OPENROUTER_API_KEY`.
-   - Menggunakan failover multi-model teruji (`deepseek/deepseek-chat`, `qwen/qwen-2.5-72b-instruct`, `google/gemini-3.8-flash`) dengan batasan token ketat agar tidak memicu galat kuota (error 402).
+   - Menggunakan failover multi-model teruji (`deepseek/deepseek-chat`, `qwen/qwen-2.5-72b-instruct`, `google/gemini-3.8-flash`, `google/gemini-2.5-flash`) dengan batas waktu per-model 12–20 detik dan batasan token ketat.
 3. **Tier 3 — Cadangan Terakhir (Google GenAI SDK)**:
    - Berfungsi murni sebagai jaring pengaman (*last-resort safety net*) apabila seluruh penyedia mandiri tidak dapat dihubungi atau kehabisan kuota secara bersamaan.
 

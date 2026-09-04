@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { fetchWithAuth } from "../../lib/api";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
 import { ArrowLeft, BookOpen, Clock, PenTool, Brain, Trash2, Edit2, Save, Image as ImageIcon, Book, CheckCircle2, Bookmark, Flame, Plus, X, Sparkles, Loader2, Network, ArrowUpRight, FileText } from "lucide-react";
@@ -231,7 +232,7 @@ export function BookDetailPage() {
     const toastId = addToast({ type: 'loading', message: 'AI sedang merangkum literatur...' });
 
     try {
-      const res = await fetch("/api/ai/summarize-literature", {
+      const res = await fetchWithAuth("/api/ai/summarize-literature", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: textToSummarize })
@@ -663,6 +664,9 @@ export function BookDetailPage() {
                 <span className="font-semibold text-gray-900 block text-xs uppercase tracking-wider mb-1">3. Kesimpulan</span>
                 <p className="text-gray-700 leading-relaxed">{summaryResult.conclusion || "-"}</p>
               </div>
+              <p className="text-[11px] text-gray-500 font-mono pt-2 border-t border-gray-200">
+                Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+              </p>
             </div>
           )}
         </DialogContent>

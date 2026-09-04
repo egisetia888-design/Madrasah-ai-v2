@@ -1,9 +1,10 @@
 import { fetchWithAuth } from '../../lib/api';
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
-import { ArrowLeft, Save, Trash2, Send, ChevronDown, Sparkles, Check, X } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Send, ChevronDown, Sparkles, Check, X, Download, Copy, Printer, Share2 } from "lucide-react";
 import * as LucideIcons from "lucide-react";
+import { saveAs } from "file-saver";
 import { ContextualSidebar } from "../../components/writing/ContextualSidebar";
 import { useWritingStore } from "../../store/writingStore";
 import { useNotesStore } from "../../store/notesStore";
@@ -39,7 +40,9 @@ export function WritingDetailPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<{ tags: string[], icon: string } | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const addTag = useNotesStore(state => state.addTag);
   const notes = useNotesStore(state => state.notes);
@@ -142,11 +145,91 @@ export function WritingDetailPage() {
     navigate("/writing");
   };
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+    if (isExportMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isExportMenuOpen]);
+
+  const generateMarkdownWithFrontmatter = () => {
+    const wordCount = content.split(/\s+/).filter(w => w.length > 0).length;
+    const tagsList = draft.tags && draft.tags.length > 0 
+      ? `\ntags:\n${draft.tags.map(t => `  - "${t}"`).join('\n')}`
+      : '\ntags: []';
+
+    return `---
+title: "${(title || draft.title || 'Tanpa Judul').replace(/"/g, '\\"')}"
+status: ${status}${tagsList}
+words: ${wordCount}
+created: ${new Date(draft.createdAt).toISOString()}
+updated: ${new Date(draft.updatedAt).toISOString()}
+---
+
+# ${title || draft.title || 'Tanpa Judul'}
+
+${content}
+`;
+  };
+
+  const handleCopyMarkdown = async () => {
+    try {
+      const md = generateMarkdownWithFrontmatter();
+      await navigator.clipboard.writeText(md);
+      addToast({ type: 'success', message: 'Markdown beserta frontmatter berhasil disalin ke clipboard.' });
+      setIsExportMenuOpen(false);
+    } catch (err) {
+      console.error('Failed to copy markdown:', err);
+      addToast({ type: 'error', message: 'Gagal menyalin markdown ke clipboard.' });
+    }
+  };
+
+  const handleDownloadMarkdown = () => {
+    try {
+      const md = generateMarkdownWithFrontmatter();
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+      const safeTitle = (title.trim() || draft.title.trim() || 'draf-tulisan')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '') || 'draf-tulisan';
+      saveAs(blob, `${safeTitle}.md`);
+      addToast({ type: 'success', message: `Berkas ${safeTitle}.md berhasil diunduh.` });
+      setIsExportMenuOpen(false);
+    } catch (err) {
+      console.error('Failed to download markdown:', err);
+      addToast({ type: 'error', message: 'Gagal mengunduh berkas Markdown.' });
+    }
+  };
+
+  const handlePrintDocument = () => {
+    setIsExportMenuOpen(false);
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
   return (
     <div className="flex h-full animate-in fade-in duration-500">
-      <div className="flex-1 overflow-y-auto px-6 py-6 pb-20">
-        <div className="max-w-4xl mx-auto space-y-6">
-          <div className="flex items-center justify-between">
+      <div className="flex-1 overflow-y-auto px-6 py-6 pb-20 print:p-0 print:overflow-visible">
+        {/* Printable View - only visible during window.print() */}
+        <div className="hidden print:block print-area font-serif text-black leading-relaxed whitespace-pre-wrap">
+          <h1 className="text-3xl font-bold mb-2">{title || draft.title || 'Tanpa Judul'}</h1>
+          <div className="text-xs text-gray-600 font-mono mb-6 pb-2 border-b border-gray-300">
+            Status: {status.toUpperCase()} • {content.split(/\s+/).filter(w => w.length > 0).length} kata • Terakhir disunting: {new Date(draft.updatedAt).toLocaleDateString()}
+          </div>
+          <div className="text-base leading-relaxed whitespace-pre-wrap">{content}</div>
+        </div>
+
+        {/* Interactive Editor View - hidden during window.print() */}
+        <div className="max-w-4xl mx-auto space-y-6 print:hidden">
+          <div className="flex items-center justify-between no-print">
             <Button variant="ghost" className="gap-2 -ml-3 text-gray-500 hover:text-gray-900" onClick={() => navigate("/writing")}>
               <ArrowLeft className="w-4 h-4" />
               Kembali
@@ -180,7 +263,50 @@ export function WritingDetailPage() {
                 </select>
                 <ChevronDown className="w-4 h-4 absolute right-2.5 top-2.5 text-gray-400 pointer-events-none" />
               </div>
-              <Button onClick={handleSave} className="gap-2 bg-gray-900 text-white hover:bg-gray-800">
+
+              {/* Export Dropdown */}
+              <div className="relative" ref={exportMenuRef}>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                  className="gap-2 text-gray-900 bg-white border-gray-200 hover:bg-gray-50 rounded-xl"
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Ekspor</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
+                </Button>
+
+                {isExportMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-52 bg-white rounded-2xl shadow-lg border border-gray-200 py-1.5 z-50 animate-in fade-in duration-150">
+                    <div className="px-3 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wider font-mono border-b border-gray-100">
+                      Format Ekspor
+                    </div>
+                    <button
+                      onClick={handleCopyMarkdown}
+                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <Copy className="w-4 h-4 text-gray-500" />
+                      <span>Salin Markdown (+ YAML)</span>
+                    </button>
+                    <button
+                      onClick={handleDownloadMarkdown}
+                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <Download className="w-4 h-4 text-gray-500" />
+                      <span>Unduh Berkas (.md)</span>
+                    </button>
+                    <button
+                      onClick={handlePrintDocument}
+                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4 text-gray-500" />
+                      <span>Cetak / Simpan PDF</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <Button onClick={handleSave} className="gap-2 bg-gray-900 text-white hover:bg-gray-800 rounded-xl">
                 <Save className="w-4 h-4" />
                 <span className="hidden sm:inline">{isSaving ? "Tersimpan!" : "Simpan Draf"}</span>
               </Button>
@@ -202,7 +328,7 @@ export function WritingDetailPage() {
                     </Button>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-4 items-center">
+                <div className="flex flex-wrap gap-4 items-center mb-3">
                   <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-gray-200">
                     <span className="text-xs text-gray-500 font-medium uppercase tracking-wider font-mono">Ikon:</span>
                     {(() => {
@@ -220,6 +346,9 @@ export function WritingDetailPage() {
                     ))}
                   </div>
                 </div>
+                <p className="text-[11px] text-gray-500 font-mono pt-2 border-t border-gray-200">
+                  Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+                </p>
               </div>
             )}
 
@@ -256,14 +385,16 @@ export function WritingDetailPage() {
         </div>
       </div>
 
-      <ContextualSidebar 
-        title={title} 
-        content={content} 
-        currentDraftId={draft.id} 
-        onInsertWikilink={(linkTitle) => {
-          setContent(prev => `${prev} [[${linkTitle}]] `);
-        }}
-      />
+      <div className="no-print print:hidden">
+        <ContextualSidebar 
+          title={title} 
+          content={content} 
+          currentDraftId={draft.id} 
+          onInsertWikilink={(linkTitle) => {
+            setContent(prev => `${prev} [[${linkTitle}]] `);
+          }}
+        />
+      </div>
 
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogHeader>

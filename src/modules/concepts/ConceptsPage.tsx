@@ -1,5 +1,6 @@
 import { SyncStatusIndicator } from '../../components/ui/SyncStatusIndicator';
 import { useState, useMemo } from "react";
+import { fetchWithAuth } from "../../lib/api";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, BrainCircuit, Edit2, Trash2, Network, Sparkles, Zap, ArrowRight, CheckCircle2, Save, ChevronDown, Check } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog";
@@ -10,6 +11,7 @@ import { useReviewStore } from "../../store/reviewStore";
 import { autoLinkSingleEntity, runAutoLinker, scanTextForEntities } from "../../utils/autoLinker";
 import { Concept, ConceptEvolutionStatus, EpistemicDomain } from "../../types";
 import { cn } from "../../utils/cn";
+import { ProvenanceBadge } from "../../components/ui/ProvenanceBadge";
 
 export function ConceptsPage() {
   const navigate = useNavigate();
@@ -26,6 +28,7 @@ export function ConceptsPage() {
   const addFlashcard = useReviewStore(state => state.addFlashcard);
 
   const [search, setSearch] = useState("");
+  const [filterVerifiedOnly, setFilterVerifiedOnly] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isAutoLinking, setIsAutoLinking] = useState(false);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
@@ -49,12 +52,21 @@ export function ConceptsPage() {
   const [activeTab, setActiveTab] = useState<'ai' | 'manual'>('ai');
 
   const filteredConcepts = useMemo(() => {
-    return concepts.filter(c =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.definition.toLowerCase().includes(search.toLowerCase()) ||
-      c.aliases.some(a => a.toLowerCase().includes(search.toLowerCase()))
-    );
-  }, [concepts, search]);
+    return concepts.filter(c => {
+      const matchSearch =
+        c.name.toLowerCase().includes(search.toLowerCase()) ||
+        c.definition.toLowerCase().includes(search.toLowerCase()) ||
+        c.aliases.some(a => a.toLowerCase().includes(search.toLowerCase()));
+      if (!matchSearch) return false;
+
+      if (filterVerifiedOnly) {
+        const conceptRels = relations.filter(r => r.sourceNodeId === c.id || r.targetNodeId === c.id);
+        if (conceptRels.length === 0) return false;
+        return conceptRels.some(r => r.createdBy === 'user' || r.verifiedBySystem);
+      }
+      return true;
+    });
+  }, [concepts, search, filterVerifiedOnly, relations]);
 
   const liveDetected = useMemo(() => {
     return scanTextForEntities(`${name}\n${definition}\n${aliases}`);
@@ -173,7 +185,7 @@ export function ConceptsPage() {
     const toastId = addToast({ type: 'loading', message: 'AI sedang menyusun kartu flash dari konsep...' });
 
     try {
-      const res = await fetch("/api/ai/generate-flashcards", {
+      const res = await fetchWithAuth("/api/ai/generate-flashcards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: selectedConceptForFc.name + "\n\n" + selectedConceptForFc.definition }),
@@ -259,17 +271,37 @@ export function ConceptsPage() {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="mb-6">
-        <div className="relative">
+      {/* Search and Filters */}
+      <div className="mb-6 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div className="relative flex-1">
           <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             placeholder="Cari konsep, definisi, atau alias..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900"
+            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 text-sm"
           />
+        </div>
+        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl shrink-0 text-xs font-medium">
+          <button
+            onClick={() => setFilterVerifiedOnly(false)}
+            className={cn(
+              "px-3 py-1.5 rounded-lg transition-colors",
+              !filterVerifiedOnly ? "bg-white text-gray-900 shadow-xs font-semibold" : "text-gray-600 hover:text-gray-900"
+            )}
+          >
+            Semua ({concepts.length})
+          </button>
+          <button
+            onClick={() => setFilterVerifiedOnly(true)}
+            className={cn(
+              "px-3 py-1.5 rounded-lg transition-colors",
+              filterVerifiedOnly ? "bg-white text-gray-900 shadow-xs font-semibold" : "text-gray-600 hover:text-gray-900"
+            )}
+          >
+            Hanya Terverifikasi Manual
+          </button>
         </div>
       </div>
 
@@ -314,6 +346,35 @@ export function ConceptsPage() {
                     ))}
                   </div>
                 )}
+
+                {/* Provenance Status of Concept Relations */}
+                {(() => {
+                  const conceptRels = relations.filter(r => r.sourceNodeId === concept.id || r.targetNodeId === concept.id);
+                  const unverifiedRels = conceptRels.filter(r => r.createdBy === 'ai_agent' && !r.verifiedBySystem);
+                  if (unverifiedRels.length > 0) {
+                    return (
+                      <div className="mb-3 pt-2 border-t border-gray-100 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-mono text-gray-500">Relasi AI:</span>
+                        {unverifiedRels.slice(0, 2).map(r => (
+                          <ProvenanceBadge key={r.id} relation={r} />
+                        ))}
+                        {unverifiedRels.length > 2 && (
+                          <span className="text-[10px] text-gray-400 font-mono">+{unverifiedRels.length - 2}</span>
+                        )}
+                      </div>
+                    );
+                  } else if (conceptRels.length > 0) {
+                    return (
+                      <div className="mb-3 pt-2 border-t border-gray-100 flex items-center gap-1.5">
+                        <ProvenanceBadge relation={conceptRels[0]} />
+                        {conceptRels.length > 1 && (
+                          <span className="text-[10px] text-gray-400 font-mono">+{conceptRels.length - 1} relasi</span>
+                        )}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
 
                 <div className="flex items-center justify-between pt-3 border-t border-gray-50 text-xs text-gray-500">
                   <button
@@ -495,6 +556,9 @@ export function ConceptsPage() {
                     </div>
                   ))}
                 </div>
+                <p className="text-[11px] text-gray-500 font-mono mt-1">
+                  Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+                </p>
               </div>
             )
           ) : (

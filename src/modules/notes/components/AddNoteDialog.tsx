@@ -325,6 +325,9 @@ export function AddNoteDialog({
                     )
                   })}
                 </div>
+                <p className="text-[10px] text-gray-500 font-mono pt-1">
+                  Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+                </p>
               </div>
             )}
           </div>

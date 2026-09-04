@@ -24,6 +24,8 @@ import { useAuthStore } from "../store/authStore"
 
 function ProtectedRoute() {
   const isCloudAuthenticated = useAuthStore((state) => state.isCloudAuthenticated)
+  const isLocalMode = useAuthStore((state) => state.isLocalMode)
+  const hasCompletedOnboarding = useAuthStore((state) => state.hasCompletedOnboarding)
   const isAuthLoading = useAuthStore((state) => state.isAuthLoading)
 
   if (isAuthLoading) {
@@ -33,13 +35,15 @@ function ProtectedRoute() {
           <div className="w-12 h-12 bg-gray-900 rounded-xl mx-auto flex items-center justify-center shadow-sm animate-pulse">
             <span className="text-white font-bold font-display text-xl">M</span>
           </div>
-          <p className="text-sm font-medium text-gray-500 animate-pulse">Menghubungkan ke Awan...</p>
+          <p className="text-sm font-medium text-gray-500 animate-pulse">Memuat Madrasah...</p>
         </div>
       </div>
     )
   }
 
-  if (!isCloudAuthenticated) {
+  const isAllowed = isCloudAuthenticated || isLocalMode || hasCompletedOnboarding
+
+  if (!isAllowed) {
     return <Navigate to="/login" replace />
   }
 

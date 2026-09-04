@@ -247,6 +247,9 @@ export function CurriculumPage() {
                 required
               />
             </div>
+            <p className="text-[11px] text-gray-500 font-mono">
+              Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
+            </p>
           </DialogContent>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setIsAiOpen(false)} className="w-full sm:w-auto text-gray-500 hover:text-gray-900 hover:bg-gray-100/80">
