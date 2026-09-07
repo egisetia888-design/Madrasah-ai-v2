@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Database, Download, Upload, Trash2, AlertTriangle, CheckCircle2, PlayCircle, FileText, Search, BrainCircuit, RefreshCw, Layers } from 'lucide-react';
+import { Database, Download, Upload, Trash2, AlertTriangle, CheckCircle2, PlayCircle, FileText, Search, BrainCircuit, RefreshCw, Layers, Cloud, CloudOff, User, LogIn, LogOut, AlertCircle } from 'lucide-react';
 import localforage from 'localforage';
 import { Button } from '../../components/ui/Button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/Dialog';
@@ -10,6 +10,10 @@ import { useWritingStore } from '../../store/writingStore';
 import { migrateNotesToFragments } from '../../utils/dataMigration';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
+import { isFirebaseConfigured } from '../../lib/firebase';
+import { useAuthStore } from '../../store/authStore';
+import { syncAllLocalToCloud } from '../../lib/firestoreSync';
+import { useToastStore } from '../../store/toastStore';
 
 export function SettingsPage() {
   const [exportStatus, setExportStatus] = useState<string | null>(null);
@@ -19,6 +23,58 @@ export function SettingsPage() {
   const startTour = useTourStore(state => state.startTour);
   const [indexStatus, setIndexStatus] = useState<string | null>(null);
   const [isIndexing, setIsIndexing] = useState(false);
+
+  const user = useAuthStore(state => state.user);
+  const isCloudAuthenticated = useAuthStore(state => state.isCloudAuthenticated);
+  const isAuthLoading = useAuthStore(state => state.isAuthLoading);
+  const loginWithGoogle = useAuthStore(state => state.loginWithGoogle);
+  const logout = useAuthStore(state => state.logout);
+  const addToast = useToastStore(state => state.addToast);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleCloudSync = async () => {
+    if (!isFirebaseConfigured) {
+      addToast({ type: 'error', message: 'Firebase belum dikonfigurasi di environment aplikasi.' });
+      return;
+    }
+    if (!user) {
+      addToast({ type: 'info', message: 'Silakan hubungkan akun Google terlebih dahulu untuk sinkronisasi cloud.' });
+      return;
+    }
+    setIsSyncing(true);
+    setCloudSyncStatus('Menyinkronkan data lokal ke cloud Firestore...');
+    try {
+      const result = await syncAllLocalToCloud();
+      setCloudSyncStatus(`Berhasil menyinkronkan ${result.successCount} entitas ke cloud.`);
+      addToast({ type: 'success', message: `Sinkronisasi selesai (${result.successCount} data diselaraskan).` });
+      setTimeout(() => setCloudSyncStatus(null), 5000);
+    } catch (err: any) {
+      console.error(err);
+      setCloudSyncStatus(err?.message || 'Gagal melakukan sinkronisasi cloud.');
+      addToast({ type: 'error', message: 'Gagal melakukan sinkronisasi cloud.' });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleAuthAction = async () => {
+    if (user) {
+      try {
+        await logout();
+        addToast({ type: 'info', message: 'Berhasil keluar dari akun Google.' });
+      } catch (err: any) {
+        addToast({ type: 'error', message: 'Gagal keluar dari akun.' });
+      }
+    } else {
+      try {
+        await loginWithGoogle();
+        addToast({ type: 'success', message: 'Berhasil menghubungkan akun Google.' });
+      } catch (err: any) {
+        addToast({ type: 'error', message: err?.message || 'Gagal menghubungkan akun Google.' });
+      }
+    }
+  };
 
   const handleMigration = () => {
     try {
@@ -428,6 +484,93 @@ export function SettingsPage() {
                 )}
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Cloud className="w-5 h-5 text-gray-500" />
+              <h2 className="text-lg font-medium text-gray-900 font-display">Sinkronisasi Cloud & Multi-Perangkat (Firestore)</h2>
+            </div>
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-mono font-medium ${isFirebaseConfigured ? 'bg-gray-100 text-gray-800' : 'bg-gray-100 text-gray-500'}`}>
+              {isFirebaseConfigured ? 'Firebase Aktif' : 'Firebase Offline'}
+            </span>
+          </div>
+          <div className="p-6 space-y-6">
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Madrasah beroperasi dengan filosofi <strong>Local-First</strong> (IndexedDB) di mana seluruh data Anda tetap berada di perangkat lokal. Lapisan sinkronisasi Firestore bersifat opsional untuk menyelaraskan catatan, konsep, dan progres belajar Anda ke perangkat lain melalui akun Google yang terverifikasi.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 rounded-xl border border-gray-200 bg-gray-50 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <User className="w-4 h-4 text-gray-500" />
+                    <h3 className="font-medium text-gray-900 text-sm">Status Akun Cloud</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">
+                    {user ? (
+                      <span className="text-gray-800 font-mono text-[11px] block truncate">
+                        Terhubung: {user.email || user.displayName || user.uid}
+                      </span>
+                    ) : (
+                      'Belum ada akun cloud yang terhubung. Data tersimpan di browser ini secara lokal.'
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <Button
+                    onClick={handleAuthAction}
+                    disabled={isAuthLoading || !isFirebaseConfigured}
+                    variant="outline"
+                    className="w-full gap-2 text-gray-900 border-gray-200 hover:bg-gray-100 h-11 md:h-9"
+                  >
+                    {user ? (
+                      <>
+                        <LogOut className="w-4 h-4 text-gray-600" />
+                        Putuskan Akun
+                      </>
+                    ) : (
+                      <>
+                        <LogIn className="w-4 h-4 text-gray-600" />
+                        Hubungkan Akun Google
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl border border-gray-200 bg-gray-50 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <RefreshCw className={`w-4 h-4 text-gray-500 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <h3 className="font-medium text-gray-900 text-sm">Sinkronisasi Menyeluruh</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">
+                    Kirimkan seluruh data lokal (catatan, draf, flashcard, konsep) ke Firestore dengan protokol Optimistic Concurrency Control (OCC).
+                  </p>
+                </div>
+                <div>
+                  <Button
+                    onClick={handleCloudSync}
+                    disabled={isSyncing || !user || !isFirebaseConfigured}
+                    variant="outline"
+                    className="w-full gap-2 text-gray-900 border-gray-200 hover:bg-gray-100 h-11 md:h-9"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                    {isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Sekarang'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {cloudSyncStatus && (
+              <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-700 font-mono flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-gray-900 shrink-0" />
+                <span>{cloudSyncStatus}</span>
+              </div>
+            )}
           </div>
         </section>
 

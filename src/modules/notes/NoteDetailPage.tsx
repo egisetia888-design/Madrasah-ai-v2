@@ -11,7 +11,7 @@ import { useKnowledgeStore } from "../../store/knowledgeStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog";
 import { ProvenanceBadge } from "../../components/ui/ProvenanceBadge";
 import { NoteStatus, NoteType, EpistemicDomain } from "../../types";
-import Markdown from "react-markdown";
+import { MarkdownRenderer } from "../../components/ui/MarkdownRenderer";
 import { useToastStore } from "../../store/toastStore";
 
 export function NoteDetailPage() {
@@ -573,7 +573,7 @@ export function NoteDetailPage() {
                   <div>
                     <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Kutipan Mentah (Legacy)</h3>
                     <blockquote className="border-l-2 border-gray-300 pl-4 italic text-gray-700 font-serif">
-                      <Markdown>{rawQuote}</Markdown>
+                      <MarkdownRenderer>{rawQuote}</MarkdownRenderer>
                     </blockquote>
                   </div>
                 )}
@@ -589,7 +589,7 @@ export function NoteDetailPage() {
                     <div className="space-y-3">
                       {linkedFragments.map((lf: { relation: import("../../types").Relation, fragment: import("../../types").SourceFragment }) => (
                         <blockquote key={lf.fragment.id} className="border-l-2 border-gray-400 pl-4 italic text-gray-700 font-serif">
-                          <Markdown>{lf.fragment.quote}</Markdown>
+                          <MarkdownRenderer>{lf.fragment.quote}</MarkdownRenderer>
                           <div className="flex items-center gap-2 mt-2">
                             <span className="text-xs text-gray-400 not-italic font-sans">— {lf.fragment.location}</span>
                             <ProvenanceBadge relation={lf.relation} />
@@ -616,9 +616,7 @@ export function NoteDetailPage() {
                 )}
               </div>
             )}
-            <div className="prose prose-gray max-w-none font-serif">
-              <Markdown>{processBidirectionalLinks(content)}</Markdown>
-            </div>
+            <MarkdownRenderer className="font-serif">{processBidirectionalLinks(content)}</MarkdownRenderer>
           </div>
         ) : (
           <div className="flex flex-col space-y-6 flex-1 py-4">

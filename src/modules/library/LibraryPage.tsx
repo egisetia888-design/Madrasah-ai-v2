@@ -38,17 +38,59 @@ export function LibraryPage() {
     }
 
     setIsFetchingInfo(true);
-    const toastId = addToast({ type: 'loading', message: 'Mencari metadata buku via Open Library...' });
+    const toastId = addToast({ type: 'loading', message: 'Memulai pencarian metadata buku...' });
 
     try {
       const res = await fetchWithAuth("/api/ai/book-info", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Accept": "application/x-ndjson" },
         body: JSON.stringify({ title: title.trim(), author: authorName.trim() }),
       });
 
-      const data = await res.json();
-      if (res.ok) {
+      if (!res.ok) {
+        let errMsg = 'Gagal mencari info buku.';
+        try {
+          const text = await res.text();
+          errMsg = JSON.parse(text).error || errMsg;
+        } catch(e){}
+        updateToast(toastId, { type: 'error', message: errMsg });
+        return;
+      }
+
+      if (!res.body) throw new Error("No response body");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalData = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.type === "log") {
+              updateToast(toastId, { type: 'loading', message: parsed.message });
+            } else if (parsed.type === "result") {
+              finalData = parsed.data;
+            } else if (parsed.type === "error") {
+              updateToast(toastId, { type: 'error', message: parsed.error });
+              return;
+            }
+          } catch (e) {
+            console.error("Failed to parse stream line", line);
+          }
+        }
+      }
+
+      if (finalData) {
+        const data = finalData;
         if (data.author && !authorName.trim()) {
           setAuthorName(data.author);
         }
@@ -58,15 +100,13 @@ export function LibraryPage() {
         }
         if (data.coverUrl) setCoverUrl(data.coverUrl);
 
-        if (!data.totalPages && !data.coverUrl) {
-          updateToast(toastId, { type: 'info', message: 'Metadata buku belum ditemukan di katalog. Silakan isi secara manual.' });
+        if (!data.totalPages && !data.coverUrl && !data.author) {
+          updateToast(toastId, { type: 'info', message: 'Metadata buku belum ditemukan di katalog publik. Silakan isi secara manual.' });
         } else if (data.isEstimated) {
-          updateToast(toastId, { type: 'info', message: 'Data Open Library tidak ditemukan. Informasi diperkirakan AI.' });
+          updateToast(toastId, { type: 'info', message: 'Data presisi tidak ditemukan. Sebagian informasi diperkirakan AI.' });
         } else {
-          updateToast(toastId, { type: 'success', message: 'Informasi buku berhasil ditemukan dari Open Library.' });
+          updateToast(toastId, { type: 'success', message: 'Informasi buku berhasil ditemukan dari katalog publik.' });
         }
-      } else {
-        updateToast(toastId, { type: 'error', message: data.error || 'Gagal mencari info buku.' });
       }
     } catch (error) {
       console.error(error);

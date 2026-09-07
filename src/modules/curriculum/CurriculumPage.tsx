@@ -58,15 +58,15 @@ export function CurriculumPage() {
         body: JSON.stringify({ topic }),
       });
       
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ error: res.statusText || "Respon server tidak valid." }));
       
-      if (res.ok && data.title && data.phases && data.phases.length > 0) {
+      if (res.ok && data?.title && Array.isArray(data?.phases) && data.phases.length > 0) {
         const pathId = crypto.randomUUID();
         
         addPath({
           id: pathId,
           title: data.title,
-          description: data.description,
+          description: data.description || `Panduan belajar untuk ${topic}`,
         });
 
         data.phases.forEach((phaseData: any) => {
@@ -75,16 +75,16 @@ export function CurriculumPage() {
             id: phaseId,
             pathId,
             title: phaseData.title,
-            order: phaseData.order,
+            order: phaseData.order || 1,
           });
 
-          if (phaseData.competencies) {
-            phaseData.competencies.forEach((comp: any) => {
+          if (Array.isArray(phaseData.competencies)) {
+            phaseData.competencies.forEach((comp: any, cIdx: number) => {
               addCompetency({
                 phaseId,
                 title: comp.title,
                 status: 'not-started',
-                order: comp.order || 0,
+                order: comp.order || cIdx + 1,
                 bookIds: [],
                 outputIds: []
               });
@@ -97,11 +97,11 @@ export function CurriculumPage() {
         setIsAiOpen(false);
         navigate(`/curriculum/${pathId}`);
       } else {
-        updateToast(toastId, { type: 'error', message: data.error || "Gagal merancang silabus dengan AI." });
+        updateToast(toastId, { type: 'error', message: data?.error || "Gagal merancang silabus dengan AI. Silakan coba lagi." });
       }
     } catch (err: any) {
-      console.error(err);
-      updateToast(toastId, { type: 'error', message: "Gagal menghubungkan ke layanan AI." });
+      console.error("AI Syllabus Generation Error:", err);
+      updateToast(toastId, { type: 'error', message: err?.message || "Gagal menghubungkan ke layanan AI." });
     } finally {
       setIsGenerating(false);
     }

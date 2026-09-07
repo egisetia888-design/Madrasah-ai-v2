@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
 import { ArrowLeft, CheckCircle2, BrainCircuit } from "lucide-react";
 import { useReviewStore } from "../../store/reviewStore";
-import Markdown from "react-markdown";
+import { MarkdownRenderer } from "../../components/ui/MarkdownRenderer";
 import { useToastStore } from "../../store/toastStore";
 
 export function ReviewSessionPage() {
@@ -135,7 +135,7 @@ export function ReviewSessionPage() {
           {showAnswer ? (
             <div className="p-8 md:p-12 flex flex-col items-center justify-center text-center text-lg md:text-xl text-gray-700 bg-gray-50 border-t border-gray-100 animate-in fade-in slide-in-from-bottom-4 duration-300">
               <span className="text-sm font-medium text-gray-400 mb-2">Jawaban Sebenarnya:</span>
-              <Markdown>{currentCard.back}</Markdown>
+              <MarkdownRenderer>{currentCard.back}</MarkdownRenderer>
               
               {evaluationResult && (
                 <div className={`mt-6 p-4 rounded-xl text-left text-sm w-full border ${evaluationResult.isCorrect ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-gray-50 border-gray-200 text-gray-900'}`}>

@@ -349,3 +349,47 @@ export async function syncDeleteFlashcard(flashcardId: string) {
   await syncDeleteWithDoc('flashcards', flashcardId);
 }
 
+export async function syncAllLocalToCloud(): Promise<{ total: number; successCount: number }> {
+  if (!isFirebaseConfigured || !auth || !db) {
+    throw new Error("Firebase belum dikonfigurasi di environment aplikasi.");
+  }
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("Pengguna belum masuk (login) ke akun cloud.");
+  }
+
+  const notes = useNotesStore.getState().notes;
+  const drafts = useWritingStore.getState().drafts;
+  const projects = useProjectsStore.getState().projects;
+  const books = useLibraryStore.getState().books;
+  const concepts = useKnowledgeStore.getState().concepts;
+  const fragments = useKnowledgeStore.getState().sourceFragments;
+  const relations = useKnowledgeStore.getState().relations;
+  const paths = useCurriculumStore.getState().paths;
+  const phases = useCurriculumStore.getState().phases;
+  const competencies = useCurriculumStore.getState().competencies;
+  const decks = useReviewStore.getState().decks;
+  const flashcards = useReviewStore.getState().flashcards;
+
+  const total = notes.length + drafts.length + projects.length + books.length +
+    concepts.length + fragments.length + relations.length + paths.length +
+    phases.length + competencies.length + decks.length + flashcards.length;
+
+  let successCount = 0;
+
+  for (const n of notes) { await syncSaveNote(n); successCount++; }
+  for (const d of drafts) { await syncSaveDraft(d); successCount++; }
+  for (const p of projects) { await syncSaveProject(p); successCount++; }
+  for (const b of books) { await syncSaveBook(b); successCount++; }
+  for (const c of concepts) { await syncSaveConcept(c); successCount++; }
+  for (const f of fragments) { await syncSaveSourceFragment(f); successCount++; }
+  for (const r of relations) { await syncSaveRelation(r); successCount++; }
+  for (const lp of paths) { await syncSaveLearningPath(lp); successCount++; }
+  for (const ph of phases) { await syncSavePhase(ph); successCount++; }
+  for (const comp of competencies) { await syncSaveCompetency(comp); successCount++; }
+  for (const dk of decks) { await syncSaveDeck(dk); successCount++; }
+  for (const fc of flashcards) { await syncSaveFlashcard(fc); successCount++; }
+
+  return { total, successCount };
+}
+

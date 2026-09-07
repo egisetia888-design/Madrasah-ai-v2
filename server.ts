@@ -6,12 +6,72 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 dotenv.config();
 
+// Process-level safety net for unhandled promise rejections
+process.on('unhandledRejection', (reason: any) => {
+  console.warn('[Process Warning] Handled late unhandled promise rejection:', reason?.message || reason);
+});
+
 // In-memory cache for AI responses
 const aiCache = new Map<string, { timestamp: number, data: any }>();
 const CACHE_TTL = 1000 * 60 * 60; // 1 hour
 
 function getCacheKey(endpoint: string, body: any) {
   return `${endpoint}:${JSON.stringify(body)}`;
+}
+
+/**
+ * Attempts to repair JSON that was prematurely cut off by LLM token limits
+ * by closing unclosed strings, dangling keys, and balancing delimiters.
+ */
+function repairTruncatedJson(str: string): string {
+  let inString = false;
+  let isEscaped = false;
+  const stack: string[] = [];
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === '\\') {
+        isEscaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else {
+      if (char === '"') {
+        inString = true;
+      } else if (char === '{' || char === '[') {
+        stack.push(char);
+      } else if (char === '}' || char === ']') {
+        const top = stack[stack.length - 1];
+        if ((char === '}' && top === '{') || (char === ']' && top === '[')) {
+          stack.pop();
+        }
+      }
+    }
+  }
+
+  let repaired = str;
+  // If ended while still inside a string literal, close it
+  if (inString) {
+    repaired += '"';
+  }
+
+  // Remove trailing dangling keys or trailing commas: e.g. `,"key": ` or `,"key"` or `, `
+  repaired = repaired.trim();
+  repaired = repaired.replace(/,\s*$/, '');
+  repaired = repaired.replace(/,\s*"[^"]*"\s*:\s*$/, '');
+  repaired = repaired.replace(/,\s*"[^"]*"\s*$/, '');
+
+  // Close all remaining unclosed braces and brackets in LIFO order
+  while (stack.length > 0) {
+    const openChar = stack.pop();
+    if (openChar === '{') repaired += '}';
+    else if (openChar === '[') repaired += ']';
+  }
+
+  return repaired;
 }
 
 function cleanAndParseJson(text: string, fallback: any = {}) {
@@ -32,27 +92,42 @@ function cleanAndParseJson(text: string, fallback: any = {}) {
     try {
       return JSON.parse(cleanText);
     } catch (directErr) {
-      // Find outermost JSON object or array
+      // Find candidate starting with outermost brace or bracket
       const firstBrace = cleanText.indexOf('{');
-      const lastBrace = cleanText.lastIndexOf('}');
       const firstBracket = cleanText.indexOf('[');
-      const lastBracket = cleanText.lastIndexOf(']');
-
-      let candidate = "";
-      if (firstBrace !== -1 && lastBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
-        candidate = cleanText.substring(firstBrace, lastBrace + 1);
-      } else if (firstBracket !== -1 && lastBracket !== -1) {
-        candidate = cleanText.substring(firstBracket, lastBracket + 1);
+      let candidate = cleanText;
+      if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+        candidate = cleanText.substring(firstBrace);
+      } else if (firstBracket !== -1) {
+        candidate = cleanText.substring(firstBracket);
       }
 
-      if (candidate) {
-        // Fix trailing commas if any (e.g. [1, 2, ])
-        const sanitized = candidate
+      // Try repairing potentially truncated JSON
+      try {
+        const repaired = repairTruncatedJson(candidate);
+        const sanitized = repaired
           .replace(/,\s*}/g, '}')
           .replace(/,\s*]/g, ']');
         return JSON.parse(sanitized);
+      } catch (repairErr) {
+        // As secondary fallback, check substring between first and last delimiters if present
+        const lastBrace = cleanText.lastIndexOf('}');
+        const lastBracket = cleanText.lastIndexOf(']');
+        let sliceCandidate = "";
+        if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
+          sliceCandidate = cleanText.substring(firstBrace, lastBrace + 1);
+        } else if (firstBracket !== -1 && lastBracket !== -1 && firstBracket < lastBracket) {
+          sliceCandidate = cleanText.substring(firstBracket, lastBracket + 1);
+        }
+
+        if (sliceCandidate) {
+          const sanitized = sliceCandidate
+            .replace(/,\s*}/g, '}')
+            .replace(/,\s*]/g, ']');
+          return JSON.parse(sanitized);
+        }
+        throw directErr;
       }
-      throw directErr;
     }
   } catch (error) {
     if (fallback !== null) {
@@ -146,13 +221,13 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
       ];
 
       for (const model of candidateModels) {
-        // Calculate remaining time for the whole request, reserve 2 seconds for fallback processing
         const remainingTime = timeoutMs - (Date.now() - startTime);
-        if (remainingTime < 5000) break; // Not enough time left
+        if (remainingTime < 8000) break; // Reserve time for subsequent tiers
 
-        // Allow up to 90% of the remaining time, but cap at 55 seconds to prevent extremely long hangs
-        // Minimum 15 seconds.
-        const modelTimeout = Math.max(15000, Math.min(55000, remainingTime * 0.9));
+        // Realistic per-model timeout to avoid starving subsequent providers
+        const maxModelTime = purpose === "generate-syllabus" ? 18000 : 12000;
+        const modelTimeout = Math.max(6000, Math.min(maxModelTime, remainingTime - 10000));
+        
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), modelTimeout);
 
@@ -190,6 +265,8 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
                 if (parsed === null) {
                   throw new Error("Invalid JSON generated by model (likely truncated).");
                 }
+                console.log(`[AI Provider: HCNSEC] Served (${purpose}) using model ${model}`);
+                return JSON.stringify(parsed);
               }
               console.log(`[AI Provider: HCNSEC] Served (${purpose}) using model ${model}`);
               return content;
@@ -200,7 +277,12 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
           }
         } catch (err: any) {
           clearTimeout(timer);
+          const isAborted = controller.signal.aborted || err?.name === 'AbortError' || String(err?.message).includes('aborted');
           console.warn(`[AI Provider: HCNSEC] Model ${model} failed:`, err?.message || err);
+          if (isAborted) {
+            console.warn(`[AI Provider: HCNSEC] Endpoint is unresponsive (timed out after ${modelTimeout}ms). Fast-failing HCNSEC to preserve time for Tier 2/3...`);
+            break; // Fast-fail to Tier 2 immediately instead of hanging again on same host
+          }
         }
       }
       console.warn("[AI Provider] HCNSEC models exhausted or unresponsive, seamlessly switching to Tier 2 (OpenRouter)...");
@@ -220,8 +302,8 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
       orCandidateModels.push(
         "deepseek/deepseek-chat",
         "qwen/qwen-2.5-72b-instruct",
-        "google/gemini-3.8-flash",
-        "google/gemini-2.5-flash"
+        "google/gemini-2.5-flash",
+        "meta-llama/llama-3.3-70b-instruct"
       );
       const uniqueOrModels = [...new Set(orCandidateModels)];
 
@@ -232,9 +314,11 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
 
       for (const model of uniqueOrModels) {
         const remainingTime = timeoutMs - (Date.now() - startTime);
-        if (remainingTime < 5000) break; // Not enough time left
+        if (remainingTime < 10000) break; // Reserve at least 10s for Tier 3
 
-        const modelTimeout = Math.max(12000, Math.min(50000, remainingTime * 0.9));
+        const maxModelTime = purpose === "generate-syllabus" ? 22000 : 14000;
+        const modelTimeout = Math.max(6000, Math.min(maxModelTime, remainingTime - 8000));
+        
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), modelTimeout);
 
@@ -272,6 +356,8 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
                 if (parsed === null) {
                   throw new Error("Invalid JSON generated by model (likely truncated).");
                 }
+                console.log(`[AI Provider: OpenRouter] Served (${purpose}) using model ${model}`);
+                return JSON.stringify(parsed);
               }
               console.log(`[AI Provider: OpenRouter] Served (${purpose}) using model ${model}`);
               return content;
@@ -299,6 +385,9 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
           systemInstruction: options.systemInstruction,
           temperature
         };
+        if (options.maxTokens) {
+          config.maxOutputTokens = options.maxTokens;
+        }
         if (options.jsonMode) {
           config.responseMimeType = "application/json";
           if (options.responseSchema) {
@@ -309,9 +398,23 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
           config.tools = options.tools;
         }
 
-        const geminiModels = [process.env.GEMINI_MODEL, "gemini-3.8-flash", "gemini-3.6-flash"].filter(Boolean) as string[];
-        for (const geminiModel of geminiModels) {
+        const geminiModels = [
+          process.env.GEMINI_MODEL,
+          "gemini-3.8-flash",
+          "gemini-3.1-flash-lite",
+          "gemini-3.1-pro-preview"
+        ].filter(Boolean) as string[];
+        const uniqueGeminiModels = [...new Set(geminiModels)];
+
+        let lastGeminiError: any = null;
+
+        for (const geminiModel of uniqueGeminiModels) {
           try {
+            // If previous model hit 503 (high demand spike), brief 600ms pause
+            if (lastGeminiError && (lastGeminiError?.status === 503 || String(lastGeminiError?.message).includes('503'))) {
+              await new Promise(r => setTimeout(r, 600));
+            }
+
             const response = await gemini.models.generateContent({
               model: geminiModel,
               contents: options.userPrompt,
@@ -324,21 +427,30 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
                 if (parsed === null) {
                   throw new Error("Invalid JSON generated by model (likely truncated).");
                 }
+                console.log(`[AI Provider: Gemini SDK] Served (${purpose}) via ${geminiModel}`);
+                return JSON.stringify(parsed);
               }
               console.log(`[AI Provider: Gemini SDK] Served (${purpose}) via ${geminiModel}`);
               return response.text;
             }
           } catch (modelErr: any) {
+            lastGeminiError = modelErr;
             console.warn(`[AI Provider: Gemini SDK] Model ${geminiModel} failed:`, modelErr?.message || modelErr);
             if (modelErr?.message?.includes('429') || modelErr?.message?.includes('RESOURCE_EXHAUSTED')) {
-              throw modelErr;
+              continue;
             }
           }
+        }
+        if (lastGeminiError) {
+          throw lastGeminiError;
         }
       } catch (err: any) {
         console.warn("[AI Provider: Gemini SDK] Last-resort fallback failed:", err?.message || err);
         if (err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED')) {
           throw new Error("Kuota AI pada semua penyedia telah habis (Rate Limit 429). Silakan tunggu beberapa saat.");
+        }
+        if (err?.message?.includes('503') || err?.status === 503) {
+          throw new Error("Layanan model AI sedang mengalami lonjakan beban tinggi (503). Silakan coba sesaat lagi.");
         }
         throw new Error(`AI Provider Error: ${err?.message || err}`);
       }
@@ -347,11 +459,35 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
     throw new Error("Layanan AI mandiri (HCNSEC / OpenRouter) tidak dapat dihubungi dan tidak ada cadangan aktif. Periksa konfigurasi di Settings > Secrets.");
   })();
 
+  let isSettled = false;
+  let timeoutTimer: any = null;
+
   const timeoutPromise = new Promise<string>((_, reject) => {
-    setTimeout(() => reject(new Error("Permintaan AI melebihi batas waktu maksimal. Silakan coba lagi.")), timeoutMs);
+    timeoutTimer = setTimeout(() => {
+      if (!isSettled) {
+        isSettled = true;
+        reject(new Error("Permintaan AI melebihi batas waktu maksimal. Silakan coba lagi."));
+      }
+    }, timeoutMs);
   });
 
-  return Promise.race([aiPromise, timeoutPromise]);
+  aiPromise.catch((err) => {
+    // Safely absorb any background rejection if timeout already won the race
+    if (isSettled) {
+      console.debug("[AI Provider] Late background operation error absorbed:", err?.message || err);
+    }
+  });
+
+  try {
+    const result = await Promise.race([aiPromise, timeoutPromise]);
+    isSettled = true;
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    return result;
+  } catch (err) {
+    isSettled = true;
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    throw err;
+  }
 }
 
 async function startServer() {
@@ -378,7 +514,8 @@ async function startServer() {
     message: { error: "Terlalu banyak permintaan ke AI. Silakan tunggu beberapa saat." }
   });
 
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use("/api/", apiLimiter);
   app.use("/api/ai/", aiLimiter);
 
@@ -698,13 +835,12 @@ async function startServer() {
       Design a rigorous, structured learning path based on progressive Bloom's taxonomy (Foundational Knowledge -> Core Methodology -> Advanced Synthesis & Application).
 
       Structural Requirements:
-      1. Title and comprehensive description in Indonesian.
-      2. Exactly 3 to 4 sequential pedagogical phases:
+      1. Title and concise description in Indonesian.
+      2. Exactly 3 sequential pedagogical phases:
          - Phase 1: Fondasi Konseptual & Terminologi Inti
          - Phase 2: Metode, Praktik, & Analisis Inti
-         - Phase 3: Implementasi Kritis, Studi Kasus, & Sintesis
-         - (Optional) Phase 4: Penguasaan Mandiri & Penerapan Lanjut
-      3. Each phase must contain 3 to 5 concrete competencies featuring measurable operational verbs.
+         - Phase 3: Implementasi Kritis & Sintesis Terapan
+      3. Each phase must contain 3 to 4 focused competencies. Keep each competency title and description concise (1 short sentence, max 15 words per description) to ensure complete, well-formed JSON output without token truncation.
  
       Provide all responses in Indonesian.
  
@@ -715,10 +851,10 @@ async function startServer() {
         "phases": [
           {
             "title": "Fase 1: Judul",
-            "description": "Deskripsi fase",
+            "description": "Deskripsi singkat fase",
             "order": 1,
             "competencies": [
-              { "title": "Kompetensi 1", "description": "Deskripsi kompetensi capaian terukur" }
+              { "title": "Kompetensi 1", "description": "Deskripsi capaian terukur" }
             ]
           }
         ]
@@ -763,7 +899,7 @@ async function startServer() {
         jsonMode: true,
         responseSchema: schema,
         temperature: 0.25,
-        maxTokens: 1600,
+        maxTokens: 3500,
         timeoutMs: 90000,
         purpose: "generate-syllabus"
       });
@@ -985,7 +1121,7 @@ async function fetchFromOpenLibrary(title: string, author?: string): Promise<Ope
     extractFromDocs(titleDocs);
   }
 
-  if (bestCoverUrl || bestTotalPages > 0) {
+  if (bestCoverUrl || bestTotalPages > 0 || bestAuthor) {
     return {
       totalPages: bestTotalPages,
       coverUrl: bestCoverUrl,
@@ -997,14 +1133,106 @@ async function fetchFromOpenLibrary(title: string, author?: string): Promise<Ope
   return null;
 }
 
+async function fetchFromGoogleBooks(title: string, author?: string): Promise<OpenLibraryBookResult | null> {
+  const cleanTitle = String(title || "").trim();
+  const cleanAuthor = String(author || "").trim();
+
+  if (!cleanTitle) return null;
+
+  let query = cleanTitle;
+  if (cleanAuthor) {
+    query += `+inauthor:${cleanAuthor}`;
+  }
+
+  const queryUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=5`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+  try {
+    const res = await fetch(queryUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      console.warn(`[GoogleBooks] Search returned status ${res.status} for query "${query}"`);
+      return null;
+    }
+
+    const data = await res.json() as any;
+    if (data.items && data.items.length > 0) {
+      let bestTotalPages = 0;
+      let bestCoverUrl = "";
+      let bestAuthor = "";
+
+      for (const item of data.items) {
+        const vol = item.volumeInfo;
+        if (!vol) continue;
+
+        if (!bestAuthor && vol.authors && Array.isArray(vol.authors) && vol.authors.length > 0) {
+          bestAuthor = String(vol.authors[0]).trim();
+        }
+
+        if (bestTotalPages === 0 && typeof vol.pageCount === "number" && vol.pageCount > 0) {
+          bestTotalPages = Math.round(vol.pageCount);
+        }
+
+        if (!bestCoverUrl && vol.imageLinks && vol.imageLinks.thumbnail) {
+          // Upgrade to https and use larger image if available by manipulating the URL
+          let thumb = String(vol.imageLinks.thumbnail).replace("http:", "https:");
+          thumb = thumb.replace("&edge=curl", "");
+          // zoom=1 is thumbnail, zoom=0 or omitting can be larger, but thumbnail is safe
+          bestCoverUrl = thumb;
+        }
+
+        if (bestTotalPages > 0 && bestCoverUrl && bestAuthor) {
+          break; // Found everything we need
+        }
+      }
+
+      if (bestTotalPages > 0 || bestCoverUrl || bestAuthor) {
+        return {
+          totalPages: bestTotalPages,
+          coverUrl: bestCoverUrl,
+          author: bestAuthor || undefined,
+          isEstimated: false
+        };
+      }
+    }
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    console.warn(`[GoogleBooks] Search failed for query "${query}":`, err?.message || err);
+  }
+
+  return null;
+}
+
   app.post("/api/ai/book-info", async (req, res) => {
+    // Enable chunked streaming for real-time NDJSON logs
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.setHeader("Transfer-Encoding", "chunked");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    const sendLog = (message: string) => {
+      res.write(JSON.stringify({ type: "log", message }) + "\n");
+    };
+
+    const sendResult = (data: any) => {
+      res.write(JSON.stringify({ type: "result", data }) + "\n");
+      res.end();
+    };
+
+    const sendError = (error: string) => {
+      res.write(JSON.stringify({ type: "error", error }) + "\n");
+      res.end();
+    };
+
     try {
       const { title, author } = req.body;
       const cleanTitle = String(title || "").trim();
       const cleanAuthor = String(author || "").trim();
 
       if (!cleanTitle) {
-        return res.status(400).json({ error: "Judul buku wajib diisi" });
+        return sendError("Judul buku wajib diisi");
       }
 
       const cacheKey = getCacheKey("book-info", { title: cleanTitle, author: cleanAuthor });
@@ -1012,80 +1240,128 @@ async function fetchFromOpenLibrary(title: string, author?: string): Promise<Ope
       const cached = aiCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
         console.log(`[Cache Hit] /api/ai/book-info`);
-        return res.json(cached.data);
+        sendLog("Menemukan data di dalam cache memori...");
+        return sendResult(cached.data);
       }
 
-      // Step 1: Direct OpenLibrary API lookup
-      const openLibResult = await fetchFromOpenLibrary(cleanTitle, cleanAuthor);
-      if (openLibResult) {
-        console.log(`[OpenLibrary Hit] Metadata found for "${cleanTitle}":`, openLibResult);
-        aiCache.set(cacheKey, { timestamp: Date.now(), data: openLibResult });
-        return res.json(openLibResult);
-      }
-
-      console.log(`[OpenLibrary Miss] Docs empty for "${cleanTitle}". Proceeding to AI fallback.`);
+      sendLog("Menghubungi server katalog Open Library...");
+      let openLibResult = await fetchFromOpenLibrary(cleanTitle, cleanAuthor);
       
-      // Step 2: Fallback to AI estimation
-      const systemInstruction = `
-      You are the Madrasah Bibliographic Metadata Estimation Engine.
-      The Open Library API returned no direct records for "${cleanTitle}".
-      Provide an objective estimated page count and optional cover URL for this published work.
-      
-      Requirements:
-      1. Provide a realistic estimated total page count based on typical published or academic editions.
-      2. If you know a valid Open Library ISBN or Cover ID, you may provide "https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg" or "https://covers.openlibrary.org/b/id/{cover_id}-L.jpg".
-      3. If no verified ISBN or Cover ID is known, return an empty string "" instead of guessing invalid URLs.
-      
-      Respond ONLY with a raw JSON object matching the schema:
-      {"totalPages": 320, "coverUrl": ""}
-      `;
-
-      const schema = {
-        type: Type.OBJECT,
-        properties: {
-          totalPages: { type: Type.INTEGER },
-          coverUrl: { type: Type.STRING }
-        },
-        required: ["totalPages", "coverUrl"]
-      };
-
-      const text = await executeAIRequest({
-        systemInstruction,
-        userPrompt: `Title: ${cleanTitle}\nAuthor: ${cleanAuthor || "Unknown"}`,
-        jsonMode: true,
-        responseSchema: schema,
-        temperature: 0.0,
-        maxTokens: 250,
-        purpose: "book-info"
-      });
-
-      const parsed = cleanAndParseJson(text, { totalPages: 0, coverUrl: "" });
-      
-      let rawPages = parsed.totalPages ?? parsed.total_pages ?? parsed.pages ?? parsed.pageCount ?? 0;
-      let totalPages = typeof rawPages === 'number' ? Math.round(rawPages) : parseInt(String(rawPages), 10) || 0;
-      if (totalPages < 0) totalPages = 0;
-
-      let coverUrl = typeof parsed.coverUrl === 'string' 
-        ? parsed.coverUrl 
-        : (parsed.cover_url || parsed.cover || parsed.image_url || parsed.imageUrl || "");
-
-      if (typeof coverUrl === 'string') {
-        coverUrl = coverUrl.trim();
-        if (!coverUrl.startsWith("http://") && !coverUrl.startsWith("https://")) {
-          coverUrl = "";
+      if (!openLibResult || !openLibResult.coverUrl || openLibResult.totalPages === 0 || !openLibResult.author) {
+        sendLog("Data Open Library belum lengkap. Beralih mencari via Google Books...");
+        const googleResult = await fetchFromGoogleBooks(cleanTitle, cleanAuthor);
+        if (googleResult) {
+          if (!openLibResult) openLibResult = googleResult;
+          else {
+            openLibResult.coverUrl = openLibResult.coverUrl || googleResult.coverUrl;
+            openLibResult.totalPages = openLibResult.totalPages || googleResult.totalPages;
+            openLibResult.author = openLibResult.author || googleResult.author;
+          }
         }
-      } else {
-        coverUrl = "";
       }
 
-      const resultData = { totalPages, coverUrl, isEstimated: true };
-      
-      aiCache.set(cacheKey, { timestamp: Date.now(), data: resultData });
-      res.json(resultData);
+      if (!openLibResult || openLibResult.totalPages === 0 || !openLibResult.author) {
+        sendLog("Data literatur masih rumpang. Memicu Mesin AI untuk estimasi & analisis...");
+        
+        const systemInstruction = `
+        You are the Madrasah Bibliographic Metadata Estimation Engine.
+        We need to complete the metadata for a published work titled "${cleanTitle}".
+        Provide an objective estimated page count, author name (if known), and optional cover URL for this published work.
+        
+        Requirements:
+        1. Provide a realistic estimated total page count based on typical published or academic editions.
+        2. Provide the author's full name if known.
+        3. If you know a valid Open Library ISBN or Cover ID, you may provide "https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg" or "https://covers.openlibrary.org/b/id/{cover_id}-L.jpg".
+        4. If no verified ISBN or Cover ID is known, return an empty string "" instead of guessing invalid URLs.
+        
+        Respond ONLY with a raw JSON object matching the schema:
+        {"totalPages": 320, "coverUrl": "", "author": "Author Name"}
+        `;
+
+        const schema = {
+          type: Type.OBJECT,
+          properties: {
+            totalPages: { type: Type.INTEGER },
+            coverUrl: { type: Type.STRING },
+            author: { type: Type.STRING }
+          },
+          required: ["totalPages", "coverUrl"]
+        };
+
+        try {
+          const text = await executeAIRequest({
+            systemInstruction,
+            userPrompt: `Title: ${cleanTitle}\nAuthor: ${cleanAuthor || openLibResult?.author || "Unknown"}`,
+            jsonMode: true,
+            responseSchema: schema,
+            temperature: 0.0,
+            maxTokens: 250,
+            purpose: "book-info"
+          });
+
+          sendLog("Berhasil menganalisis respons AI. Menyusun ulang data hibrida...");
+          const parsed = cleanAndParseJson(text, { totalPages: 0, coverUrl: "", author: "" });
+          
+          let rawPages = parsed.totalPages ?? parsed.total_pages ?? parsed.pages ?? parsed.pageCount ?? 0;
+          let aiTotalPages = typeof rawPages === 'number' ? Math.round(rawPages) : parseInt(String(rawPages), 10) || 0;
+          if (aiTotalPages < 0) aiTotalPages = 0;
+
+          let aiCoverUrl = typeof parsed.coverUrl === 'string' 
+            ? parsed.coverUrl 
+            : (parsed.cover_url || parsed.cover || parsed.image_url || parsed.imageUrl || "");
+
+          if (typeof aiCoverUrl === 'string') {
+            aiCoverUrl = aiCoverUrl.trim();
+            if (!aiCoverUrl.startsWith("http://") && !aiCoverUrl.startsWith("https://")) {
+              aiCoverUrl = "";
+            }
+          } else {
+            aiCoverUrl = "";
+          }
+
+          let aiAuthor = typeof parsed.author === 'string' ? parsed.author.trim() : "";
+
+          if (!openLibResult) {
+            openLibResult = {
+              totalPages: aiTotalPages,
+              coverUrl: aiCoverUrl,
+              author: aiAuthor || undefined,
+              isEstimated: true
+            };
+          } else {
+            openLibResult.totalPages = openLibResult.totalPages || aiTotalPages;
+            openLibResult.coverUrl = openLibResult.coverUrl || aiCoverUrl;
+            openLibResult.author = openLibResult.author || aiAuthor;
+            openLibResult.isEstimated = true;
+          }
+        } catch (aiErr: any) {
+          console.warn("[AI Fallback] Failed but continuing with partial API data:", aiErr?.message || aiErr);
+          sendLog("Peringatan: Analisis AI terganggu. Melanjutkan dengan data yang ada...");
+        }
+      }
+
+      if (openLibResult) {
+        sendLog("Metadata berhasil dirangkai utuh.");
+        console.log(`[Final Result] Metadata assembled for "${cleanTitle}":`, openLibResult);
+        aiCache.set(cacheKey, { timestamp: Date.now(), data: openLibResult });
+        return sendResult(openLibResult);
+      }
+
+      return sendError("Gagal menemukan informasi buku dari semua sumber.");
     } catch (error: any) {
       console.error("AI Book Info Error:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch book info" });
+      return sendError(error.message || "Failed to fetch book info");
     }
+  });
+
+  // Global error handler for API routes to prevent HTML error pages
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.path.startsWith("/api/")) {
+      console.error("[API Error]", err);
+      res.status(err.status || 500).json({ error: err.message || "Internal Server Error" });
+      return;
+    }
+    next(err);
   });
 
   // Vite middleware for development

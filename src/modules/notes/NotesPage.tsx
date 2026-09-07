@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react"
 import { fetchWithAuth } from "../../lib/api"
 import { Button } from "../../components/ui/Button"
-import { Plus, Sparkles, Filter, Zap } from "lucide-react"
+import { Plus, Sparkles, Filter, Zap, Search } from "lucide-react"
 import { useNotesStore } from "../../store/notesStore"
 import { useKnowledgeStore } from "../../store/knowledgeStore"
 import { autoLinkSingleEntity, scanTextForEntities, runAutoLinker } from "../../utils/autoLinker"
@@ -281,8 +281,18 @@ export function NotesPage() {
         </div>
       </div>
 
-      {/* Quick Mobile Horizontal Category Tabs */}
+      {/* Quick Mobile Search & Category Tabs */}
       <div className="lg:hidden mb-4 space-y-2.5">
+        <div className="relative">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            placeholder="Cari catatan..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-1 focus:ring-gray-300 outline-none shadow-2xs placeholder:text-gray-400"
+          />
+        </div>
         <div className="flex items-center gap-1.5 overflow-x-auto w-full no-scrollbar py-1 scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0">
           {[
             { id: 'all', label: 'Semua' },

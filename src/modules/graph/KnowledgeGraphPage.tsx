@@ -12,7 +12,7 @@ import { useKnowledgeStore } from "../../store/knowledgeStore"
 import { useToastStore } from "../../store/toastStore"
 import { runAutoLinker, getAutoLinkedRelationsForEntity, autoLinkSingleEntity } from "../../utils/autoLinker"
 import { cn } from "../../utils/cn"
-import Markdown from "react-markdown"
+import { MarkdownRenderer } from "../../components/ui/MarkdownRenderer"
 
 import { ProvenanceBadge } from "../../components/ui/ProvenanceBadge"
 
@@ -577,7 +577,7 @@ export function KnowledgeGraphPage() {
 
         {/* Right Side: Details Panel */}
         {selectedNode && (
-          <div className="fixed inset-x-0 bottom-20 lg:static z-30 lg:z-auto bg-white border-t lg:border border-gray-200 rounded-t-2xl lg:rounded-2xl shadow-2xl lg:shadow-sm flex flex-col h-[50vh] lg:h-auto w-full lg:w-80 xl:w-96 shrink-0 animate-in slide-in-from-bottom-4 lg:slide-in-from-right-4 duration-300">
+          <div className="fixed inset-x-0 bottom-16 sm:bottom-20 lg:static z-40 lg:z-auto bg-white border-t lg:border border-gray-200 rounded-t-2xl lg:rounded-2xl shadow-2xl lg:shadow-sm flex flex-col h-[52vh] lg:h-auto w-full lg:w-80 xl:w-96 shrink-0 animate-in slide-in-from-bottom-4 lg:slide-in-from-right-4 duration-300">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 {getTypeIcon(selectedNode.type)}
@@ -594,8 +594,8 @@ export function KnowledgeGraphPage() {
               {nodeDetails && (nodeDetails as any).content && (
                 <div className="mb-6">
                   <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Pratinjau</h3>
-                  <div className="text-sm text-gray-600 line-clamp-5 prose prose-sm">
-                    <Markdown>{((nodeDetails as any).content)}</Markdown>
+                  <div className="text-sm text-gray-600 line-clamp-5">
+                    <MarkdownRenderer className="prose-sm">{((nodeDetails as any).content)}</MarkdownRenderer>
                   </div>
                 </div>
               )}

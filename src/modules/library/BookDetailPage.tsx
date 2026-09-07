@@ -55,6 +55,12 @@ export function BookDetailPage() {
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summaryResult, setSummaryResult] = useState<{ mainProblem?: string; methodology?: string; conclusion?: string } | null>(null);
 
+  // Connected relations for this book
+  const bookRelations = useMemo(() => {
+    if (!book) return [];
+    return relations.filter(r => r.sourceNodeId === book.id || r.targetNodeId === book.id);
+  }, [relations, book?.id]);
+
   if (!book) {
     return (
       <div className="flex flex-col items-center justify-center h-full space-y-4 py-24">
@@ -74,11 +80,6 @@ export function BookDetailPage() {
   const noteIds = bookNotes.map(n => n.id);
   const bookFlashcards = flashcards.filter(f => f.noteId && noteIds.includes(f.noteId));
 
-  // Connected relations for this book
-  const bookRelations = useMemo(() => {
-    if (!book) return [];
-    return relations.filter(r => r.sourceNodeId === book.id || r.targetNodeId === book.id);
-  }, [relations, book?.id]);
 
   const handleDelete = () => {
     if (book) {

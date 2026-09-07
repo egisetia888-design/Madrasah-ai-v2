@@ -30,10 +30,10 @@ Bukan pivot produk — perbaikan integritas di atas fondasi yang sudah shipped d
 - [x] **Resurfacing mingguan**: Catatan `processed` yang tidak disentuh selama >14 hari dimunculkan sebagai kartu "Resurfacing Mingguan" pada `DashboardPage.tsx` (baris ~272-289) dengan rotasi bergilir mingguan. (Selesai dan terverifikasi di kode).
 - [x] **Aksi konfirmasi (di atas)**: Memakai ulang komponen `ProvenanceBadge` sebagai satu-satunya titik gesekan sadar satu-sentuhan tanpa modal berlebih. (Selesai dan terverifikasi di kode).
 
-### Fase 2: Sinkronisasi Awan & Autentikasi Multi-User (Jangka Menengah)
-- [ ] **Multi-User Authentication**: Integrasi Firebase Auth untuk mendukung pendaftaran dan login aman banyak pengguna secara terisolasi.
-- [ ] **Durable Cloud Persistence**: Migrasi data opsional dari penyimpanan lokal (`localStorage`) ke basis data cloud terdistribusi (Firestore) untuk mencegah risiko hilangnya data akibat pembersihan cache peramban.
-- [ ] **Sinkronisasi Multidevice Real-Time**: Pembaruan data instan antara sesi desktop aktif dan smartphone tanpa keterlambatan.
+### Fase 2: Sinkronisasi Awan & Autentikasi Multi-User (Fase Aktif)
+- [x] **Multi-User Authentication**: Integrasi antarmuka dan penanganan Firebase Auth (Google Sign-In) dengan fallback anggun saat offline (`src/store/authStore.ts` & `src/modules/settings/SettingsPage.tsx`). (Selesai dan terverifikasi di kode).
+- [x] **Durable Cloud Persistence & OCC Sync**: Implementasi protokol Optimistic Concurrency Control (`syncWithOCC`), pemutakhiran menyeluruh data lokal ke Firestore via `syncAllLocalToCloud`, serta kendali manual di halaman Pengaturan. (Selesai dan terverifikasi di kode).
+- [ ] **Sinkronisasi Multidevice Real-Time Lanjutan**: Pembaruan data instan latar belakang antar-sesi aktif secara konstan.
 
 ### Fase 3: Kolaborasi, Ekspor Literer, dan Ekosistem Penerbitan (Jangka Panjang)
 - [x] **Ekspor Format Kaya**: Ekspor draf tulisan dari Studio Menulis langsung ke format Markdown lengkap dengan Frontmatter YAML, unduh berkas `.md`, serta Cetak / Simpan PDF bersih menggunakan lembar gaya cetak `@media print` tanpa chrome UI. (Selesai dan terverifikasi di kode).
@@ -43,6 +43,24 @@ Bukan pivot produk — perbaikan integritas di atas fondasi yang sudah shipped d
 ---
 
 ## 7.2 Riwayat Perubahan (Changelog)
+
+### v1.1.4-beta (September 2026)
+* **Penyelesaian Komprehensif Kegagalan AI Gateway & Resiliensi Multi-Tier**:
+  - **Fast-Fail & Alokasi Timeout Per-Tier**: Memperbaiki alokasi batas waktu `executeAIRequest` di `server.ts`. Mengimplementasikan deteksi pemutusan dini (*fast-fail*) pada gateway HCNSEC ketika model mengalami *abort* atau jaringan tidak merespons, mencegah pemborosan waktu tunggu berulang dan langsung mengalihkan komputasi secara mulus ke Tier 2 (OpenRouter) dan Tier 3 (Gemini SDK).
+  - **Reparasi Otomatis JSON Terpotong (`repairTruncatedJson`)**: Menambahkan algoritma penutupan string, eliminasi kunci menggantung, dan penyeimbangan kurung kurawal/siku LIFO pada `server.ts` untuk memulihkan respon JSON model yang terpotong prematur oleh batas token.
+  - **Pencegahan Error 503 Lonjakan Beban Gemini**: Menambahkan penanganan jeda adaptif dan rotasi model otomatis (`gemini-3.8-flash`, `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview`) saat menghadapi status lonjakan beban 503 UNAVAILABLE.
+  - **Pengamanan Unhandled Promise Rejection**: Menambahkan pengaman `process.on('unhandledRejection')` dan penanganan `.catch()` pada `aiPromise` di `server.ts` guna mencegah pembatalan tak tertangani saat `Promise.race` telah selesai terlebih dahulu.
+  - **Optimalisasi Silabus & Penanganan Respon UI**: Meningkatkan alokasi `maxTokens` silabus menjadi 3500 token dengan panduan instruksi kompetensi terfokus pada `server.ts`, serta memperkuat penanganan kesalahan dan ekstraksi status respon di `src/modules/curriculum/CurriculumPage.tsx`.
+
+### v1.1.3-beta (September 2026)
+* **Optimasi Pemisahan Berkas (Bundle Chunk Splitting)**:
+  - Mengonfigurasi `manualChunks` di `vite.config.ts` untuk memecah pustaka vendor besar (`@xenova/transformers`, `onnxruntime-web`, `d3`, `recharts`, `firebase`, `katex`, `react-core`) ke dalam berkas chunk terpisah, mengoptimalkan waktu muat awal aplikasi dan pemanfaatan cache peramban.
+* **Dukungan Formula KaTeX & Notasi Ilmiah**:
+  - Mengintegrasikan pustaka `remark-math`, `rehype-katex`, dan `katex` ke dalam komponen modular `MarkdownRenderer` (`src/components/ui/MarkdownRenderer.tsx`), serta mengimpor stylesheet KaTeX di `src/main.tsx`.
+  - Menerapkan rendering LaTeX di catatan hierarkis (`NoteDetailPage.tsx`), latihan flashcard SM-2 (`ReviewSessionPage.tsx`), dialog asisten AI (`AIAssistantDialog.tsx`), dan pratinjau graf pengetahuan (`KnowledgeGraphPage.tsx`).
+* **Aktivasi Antarmuka Sinkronisasi Cloud Firestore**:
+  - Menghadirkan fungsi `syncAllLocalToCloud` di `src/lib/firestoreSync.ts` untuk menyelaraskan seluruh entitas data lokal ke Firestore.
+  - Menambahkan panel kontrol sinkronisasi awan terdedikasi di `SettingsPage.tsx` lengkap dengan indikator status Firebase, otentikasi Google, dan pemicu sinkronisasi manual berestetika monokrom slate.
 
 ### v1.1.2-beta (September 2026)
 * **Keandalan Eksekusi AI (AI Gateway Reliability)**:
@@ -81,9 +99,11 @@ Bukan pivot produk — perbaikan integritas di atas fondasi yang sudah shipped d
   - Deteksi entitas waktu nyata (*live contextual detection*) di **Studio Menulis** dengan kemampuan penyisipan `[[WikiLink]]` satu sentuhan.
   - Penautan otomatis konsep, buku rujukan, dan catatan saat pembuatan/penyuntingan proyek, draf tulisan, dan kurikulum belajar.
   - Tampilan indikator badge relasi (*relation count badges*) dan panel penelusuran relasi pengetahuan interaktif pada halaman detail.
-* **Penyempurnaan Ergonomi Mobile-First (Mobile Web App Mastery)**:
-  - Mengimplementasikan bilah tab gulir horisontal (`no-scrollbar`) dengan penanganan gestur sentuh mulus di seluruh modul (**Pustaka**, **Proyek**, **Catatan**, **Kurikulum**, **Alur Menulis**, **Review**, **Konsep**, dan **Graf Pengetahuan**).
-  - Menstandarkan area sentuh minimal **44px** (`h-11`) untuk seluruh tombol aksi mobile dan input navigasi.
+* **Penyempurnaan Ergonomi Mobile-First & Kesetaraan Fitur Lintas Tampilan (Desktop & Mobile Parity)**:
+  - Sinkronisasi penuh laci navigasi mobile (`MobileNav`): penambahan daftar lengkap seluruh 9 modul kerja, daftar item terkini (*Recent Notes & Drafts*), pemicu panduan pintasan (`ShortcutGuide`), informasi sistem (`AboutDialog`), dan tombol keluar (*Logout*).
+  - Standarisasi area sentuh minimal **44px** (`min-h-[44px]`) untuk seluruh elemen kontrol sentuh pada layar ponsel.
+  - Penambahan bilah pencarian instan pada tampilan mobile modul **Catatan** (`NotesPage`) tanpa perlu membuka akordeon filter folder terlebih dahulu.
+  - Penyesuaian koordinat penumpukan (*z-index*) dan letak panel inspektur pada modul **Graf Pengetahuan** (`KnowledgeGraphPage`) agar berada tepat di atas bilah navigasi bawah tanpa menghalangi aksi interaksi.
   - Mengisolasi tingkatan penumpukan z-index dialog modal pada **`z-[100]`** dengan latar belakang redup (*backdrop blur*), mencegah konflik interaksi dengan bilah navigasi bawah (`MobileNav`).
   - Menambahkan *snap-scroll* pada papan Kanban modul **Alur Menulis** untuk transisi kolom yang alami di layar ponsel.
 * **Integrasi Gateway AI HCNSEC**:

@@ -83,6 +83,30 @@ export default defineConfig(() => {
         },
       })
     ],
+    build: {
+      chunkSizeWarningLimit: 1200,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('@xenova/transformers') || id.includes('onnxruntime-web')) {
+              return 'vendor-transformers';
+            }
+            if (id.includes('node_modules/d3') || id.includes('node_modules/recharts')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('node_modules/firebase')) {
+              return 'vendor-firebase';
+            }
+            if (id.includes('node_modules/katex') || id.includes('remark-math') || id.includes('rehype-katex')) {
+              return 'vendor-math';
+            }
+            if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router-dom') || id.includes('node_modules/zustand')) {
+              return 'vendor-core';
+            }
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
