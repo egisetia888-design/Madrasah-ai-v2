@@ -6,6 +6,7 @@ import { useAuthStore } from "../../store/authStore"
 import { useNotesStore } from "../../store/notesStore"
 import { useWritingStore } from "../../store/writingStore"
 import { PWAInstallButton } from "../PWAInstallButton"
+import { GlobalSyncBadge } from "../ui/GlobalSyncBadge"
 
 const workspaceItems = [
   { name: "Beranda", href: "/", icon: LayoutDashboard },
@@ -41,6 +42,7 @@ export function Sidebar() {
           </div>
           <span className="font-semibold text-[17px] tracking-tight font-display text-gray-900">Madrasah</span>
         </div>
+        <GlobalSyncBadge compact />
       </div>
 
       <div className="flex items-center gap-2 mb-6">

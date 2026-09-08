@@ -42,6 +42,16 @@ export interface Book extends SyncMetadata {
   isEstimatedPages?: boolean;
   createdAt: number;
 }
+
+export interface ReadingLog extends SyncMetadata {
+  id: UUID;
+  bookId: UUID;
+  date: number; // timestamp
+  pagesRead: number;
+  startPage: number;
+  endPage: number;
+  createdAt: number;
+}
 ```
 
 ### 2. Entitas Zettelkasten & Konsep (Otak Kedua)

@@ -35,14 +35,50 @@ Bukan pivot produk — perbaikan integritas di atas fondasi yang sudah shipped d
 - [x] **Durable Cloud Persistence & OCC Sync**: Implementasi protokol Optimistic Concurrency Control (`syncWithOCC`), pemutakhiran menyeluruh data lokal ke Firestore via `syncAllLocalToCloud`, serta kendali manual di halaman Pengaturan. (Selesai dan terverifikasi di kode).
 - [ ] **Sinkronisasi Multidevice Real-Time Lanjutan**: Pembaruan data instan latar belakang antar-sesi aktif secara konstan.
 
-### Fase 3: Kolaborasi, Ekspor Literer, dan Ekosistem Penerbitan (Jangka Panjang)
-- [x] **Ekspor Format Kaya**: Ekspor draf tulisan dari Studio Menulis langsung ke format Markdown lengkap dengan Frontmatter YAML, unduh berkas `.md`, serta Cetak / Simpan PDF bersih menggunakan lembar gaya cetak `@media print` tanpa chrome UI. (Selesai dan terverifikasi di kode).
-- [ ] **Pustaka Kolaboratif (Shared Curriculums)**: Pengguna dapat membagikan silabus belajar dan daftar rujukan pustaka mereka ke publik untuk dipelajari bersama.
-- [ ] **API Penerbitan Pihak Ketiga**: Integrasi ekspor tulisan langsung ke platform penerbitan mandiri seperti Ghost, Medium, atau repositori tulisan personal via Webhooks.
+### Fase 3: Kolaborasi, Ekspor Literer, dan Ekosistem Penerbitan (Fase Aktif / Selesai)
+- [x] **Ekspor Format Kaya & Literer**: Ekspor draf tulisan dari Studio Menulis langsung ke format Markdown (+ Frontmatter YAML), cetak bersih PDF terisolasi bertipografi buku (`ExportLiteraryModal.tsx`), serta unduh berkas E-Book mandiri portabel (`.html`) untuk pembacaan luring di e-reader atau peramban. (Selesai dan terverifikasi di kode).
+- [x] **Pustaka Kolaboratif (Shared Curriculums & Reading Lists)**: Kemampuan membagikan silabus belajar ke format Markdown dan berkas JSON portabel (`ShareCurriculumModal.tsx`), serta mengimpor silabus komunitas secara instan lengkap dengan fase, kompetensi, dan penambahan buku rekomendasi ke pustaka (`ImportCurriculumModal.tsx`). (Selesai dan terverifikasi di kode).
+- [x] **API Penerbitan Pihak Ketiga (Webhook Ecosystem)**: Integrasi penerbitan langsung naskah draf ke platform blog personal (Ghost, Medium, WordPress, repositori static-site) via endpoint proxy aman `/api/publishing/webhook` di `server.ts` dengan tanda tangan HMAC SHA-256 dan panel konfigurasi di `SettingsPage.tsx` serta modal penerbitan `PublishWebhookModal.tsx`. (Selesai dan terverifikasi di kode).
 
 ---
 
 ## 7.2 Riwayat Perubahan (Changelog)
+
+### v1.2.5-beta (September 2026)
+* **Arsitektur Deployment Serverless (Vercel Compatibility)**:
+  - **Modularisasi Express (`server/app.ts`)**: Memisahkan inti logika aplikasi, middleware, rate-limiter, dan pengelolaan *route* dari eksekusi server port agar mendukung lingkungan *serverless*.
+  - **Proteksi Body Parser Serverless**: Penambahan middleware `req._body` untuk mencegah *hang/timeout* pada lingkungan yang mengaplikasikan *pre-parsed body* secara otomatis seperti Vercel.
+  - **Dukungan Vercel Global Edge (`api/index.ts` & `vercel.json`)**: Mengubah konfigurasi perutean agar sepenuhnya kompatibel dengan infrastruktur *serverless function* Vercel, memungkinkan deployment instan 60 detik (hingga batas 1024MB RAM) tanpa pengelolaan infrastruktur *Cloud Run* manual.
+* **Standarisasi Dokumen & Metadata (Documentation Hygiene)**:
+  - Pembaruan *Single Source of Truth* versi (`v1.2.5-beta`) pada `metadata.json`, `package.json`, `README.md`, `AboutDialog.tsx`, dan seluruh berkas dokumentasi (`docs/01`, `docs/02`, `docs/07`).
+  - Pembaruan panduan deployment Vercel resmi di dalam direktori `docs/06`.
+
+### v1.1.5-beta (September 2026)
+* **Ekosistem Penerbitan Mandiri & Webhook Proxy Pihak Ketiga**:
+  - **Endpoint Proxy Aman (`server.ts: /api/publishing/webhook`)**: Menambahkan rute proxy POST sisi server dengan timeout 15 detik dan pembuatan tanda tangan HMAC-SHA256 (`x-madrasah-signature`) guna mengirimkan naskah draf (judul, isi, tag, kata, ringkasan) ke platform CMS atau webhook personal pengguna tanpa masalah CORS atau kebocoran kredensial.
+  - **Store Pengaturan Penerbitan (`publishingStore.ts`)**: Zustand store persisten untuk mengelola URL webhook, secret token, dan nama layanan penerbitan pengguna.
+  - **Modal Penerbitan Naskah (`PublishWebhookModal.tsx`)**: Antarmuka konfirmasi penerbitan satu-klik di Studio Menulis dengan pratinjau muatan JSON dan opsi pembaruan otomatis status draf menjadi `published`.
+  - **Panel Konfigurasi Pengaturan (`SettingsPage.tsx`)**: Menambahkan kartu "Penerbitan Pihak Ketiga & Webhook" dengan opsi uji koneksi (ping) langsung ke endpoint tujuan.
+* **Pustaka Silabus Kolaboratif (Shared Curriculums & Community Reading Lists)**:
+  - **Modal Bagikan Silabus (`ShareCurriculumModal.tsx`)**: Menghasilkan silabus Markdown terformat rapi dan berkas `.json` portabel Madrasah yang merangkum fase belajar, target kompetensi, dan daftar pustaka rujukan tertaut.
+  - **Modal Impor Silabus (`ImportCurriculumModal.tsx`)**: Memvalidasi berkas/payload JSON silabus, mengonfirmasi hierarki fase dan kompetensi, serta menyediakan opsi penambahan otomatis buku-buku rekomendasi ke pustaka lokal pengguna (status: `wishlist`).
+  - **Penyematan Titik Akses UI**: Tombol "Bagikan Silabus" di `PathDetailPage.tsx` dan tombol "Impor Silabus" di `CurriculumPage.tsx` berestetika monokrom slate dengan target sentuh mobile minimal 44px.
+* **Ekspor Literer Lanjutan & E-Book Mandiri**:
+  - **Modal Ekspor Literer (`ExportLiteraryModal.tsx`)**: Menyediakan pratinjau tipografis naskah (pilihan font Serif Klasik / Sans Modern, ukuran font standar / besar, dan visibilitas metadata naskah).
+  - **Cetak Bersih PDF Terisolasi**: Membuka jendela cetak terisolasi khusus A4 portrait dengan margin buku, tata letak justifikasi teks, dan penomoran halaman tanpa polusi bilah antarmuka web.
+  - **Unduh E-Book Standalone (`.html`)**: Menghasilkan berkas HTML tunggal responsif mandiri yang dapat dibuka langsung di peramban luring ataupun perangkat e-reader tanpa koneksi internet.
+  - **Integrasi Menu Ekspor Studio Menulis (`WritingDetailPage.tsx`)**: Menyatukan opsi ekspor Markdown, berkas `.md`, Ekspor Literer, dan Penerbitan Webhook dalam dropdown yang rapi.
+
+### v1.2.0-beta (September 2026)
+* **Tahap 1: Pembersihan & Audit Relasi AI (Kaidah Ta'dib)**:
+  - **Backfill Otomatis & Idempoten (`backfillUnverifiedAiRelations`)**: Mengimplementasikan migrasi data otomatis saat aplikasi pertama kali dimuat via `useSyncMigration.ts` (dengan flag `localStorage`) untuk menormalkan relasi AI lama yang sebelumnya terlabel `verifiedBySystem: true` menjadi `false`.
+  - **Audit Manual di Pengaturan (`SettingsPage.tsx`)**: Menyediakan tombol pemeriksaan manual "Audit Relasi AI" pada kartu Pembaruan Arsitektur Data untuk audit on-demand kedaulatan kognitif.
+  - **Komponen Penilaian Keandalan (`ReliabilityBadge.tsx`)**: Menambahkan sistem badge 4 tingkat keandalan epistemik: Sumber Primer (1.0), Sumber Sekunder (0.7), Sumber Tersier (0.4), dan Belum Diverifikasi (0.1).
+  - **Integrasi Detail Catatan (`NoteDetailPage.tsx`)**: Menyematkan `ReliabilityBadge` pada daftar kutipan fragmen di mode baca dan sunting, serta memperluas dialog penautan fragmen dengan pembuatan langsung fragmen baru beserta selektor keandalan sadar.
+* **Tahap 2: Sinkronisasi Awan Real-Time & Indikator Status Global**:
+  - **Store Status Sinkronisasi Terpusat (`syncStateStore.ts`)**: Zustand store tunggal yang memantau status sinkronisasi (`synced`, `syncing`, `offline`, `local_only`, `error`), timestamp penyelarasan terakhir, dan pesan kesalahan.
+  - **Integrasi Lifecycle Firestore (`firestoreSync.ts`)**: Menghubungkan seluruh siklus baca real-time (`onSnapshot`), penulisan bertransaksi OCC (`syncWithOCC`), penghapusan bertransaksi (`syncDeleteWithDoc`), serta penanganan kejadian jaringan online/offline ke status store terpusat.
+  - **Indikator Status Global (`GlobalSyncBadge.tsx`)**: Komponen visual monokrom slate yang tampil di bilah sisi utama (`Sidebar.tsx`), laci seluler (`MobileNav.tsx`), dan kartu pengaturan (`SettingsPage.tsx`).
 
 ### v1.1.4-beta (September 2026)
 * **Penyelesaian Komprehensif Kegagalan AI Gateway & Resiliensi Multi-Tier**:

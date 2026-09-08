@@ -1,27 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import localforage from 'localforage';
 import { Project, Task, TaskStatus } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
 import { SyncMetadata } from '../types';
 import { syncSaveProject, syncDeleteProject } from '../lib/firestoreSync';
-
-localforage.config({
-  name: 'madrasah_db',
-  storeName: 'projects_store'
-});
-
-const storage = {
-  getItem: async (name: string): Promise<string | null> => {
-    return (await localforage.getItem(name)) || null;
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    await localforage.setItem(name, value);
-  },
-  removeItem: async (name: string): Promise<void> => {
-    await localforage.removeItem(name);
-  },
-};
+import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface ProjectsState {
   projects: Project[];
@@ -118,7 +101,7 @@ export const useProjectsStore = create<ProjectsState>()(
     }),
     {
       name: 'madrasah-projects-storage-v2',
-      storage: createJSONStorage(() => storage),
+      storage: createJSONStorage(() => createIndexedDbStorage('projects_store')),
     }
   )
 );

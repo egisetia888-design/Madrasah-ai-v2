@@ -52,3 +52,24 @@ export const migrateNotesToFragments = () => {
 
   return migratedCount;
 };
+
+/**
+ * Ta'dib Layer migration:
+ * Scans all relations created by 'ai_agent' that were previously mistakenly marked
+ * with verifiedBySystem: true, and resets verifiedBySystem to false to maintain epistemic integrity.
+ */
+export const backfillUnverifiedAiRelations = (): number => {
+  const { relations, updateRelation } = useKnowledgeStore.getState();
+  let updatedCount = 0;
+
+  relations.forEach((rel) => {
+    if (rel.createdBy === 'ai_agent' && rel.verifiedBySystem) {
+      updateRelation(rel.id, {
+        verifiedBySystem: false,
+      });
+      updatedCount++;
+    }
+  });
+
+  return updatedCount;
+};

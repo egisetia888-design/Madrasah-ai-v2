@@ -1,28 +1,11 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import localforage from 'localforage';
 import { Note, Folder, Tag } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
 import { SyncMetadata } from '../types';
 import { generateEmbedding } from '../lib/semanticSearch';
 import { syncSaveNote, syncDeleteNote } from '../lib/firestoreSync';
-
-localforage.config({
-  name: 'madrasah_db',
-  storeName: 'notes_store'
-});
-
-const storage = {
-  getItem: async (name: string): Promise<string | null> => {
-    return (await localforage.getItem(name)) || null;
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    await localforage.setItem(name, value);
-  },
-  removeItem: async (name: string): Promise<void> => {
-    await localforage.removeItem(name);
-  },
-};
+import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface NotesState {
   notes: Note[];
@@ -155,7 +138,7 @@ export const useNotesStore = create<NotesState>()(
     }),
     {
       name: 'madrasah-notes-storage-v2',
-      storage: createJSONStorage(() => storage),
+      storage: createJSONStorage(() => createIndexedDbStorage('notes_store')),
     }
   )
 );

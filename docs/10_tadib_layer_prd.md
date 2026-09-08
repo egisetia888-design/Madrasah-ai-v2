@@ -5,7 +5,7 @@ Dokumen ini menggantikan 10_tadib_layer_prd.pdf (draft). Isinya sama, dengan sta
 | Atribut | Nilai |
 | :--- | :--- |
 | **Jenis Dokumen** | Product Requirements Document (PRD) — fitur tambahan |
-| **Cakupan** | Ditambahkan di atas Madrasah v1.0.0-beta yang sudah shipped. Bukan pivot produk, bukan rebrand, bukan penulisan ulang filosofi. |
+| **Cakupan** | Ditambahkan di atas Madrasah v1.2.5-beta yang sudah shipped. Bukan pivot produk, bukan rebrand, bukan penulisan ulang filosofi. |
 | **Prasyarat baca** | `docs/01_identity_and_philosophy.md`, `docs/03_architecture_and_project_structure.md`, `docs/05_data_model_and_api.md` |
 | **Status** | Final — Fase 0 & 1 disetujui untuk eksekusi. Fase 2 menunggu checkpoint pemakaian 2 minggu setelah Fase 1 berjalan. Fase 3 wajib sebelum peluncuran multi-user, belum mulai. |
 

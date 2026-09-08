@@ -2,7 +2,7 @@ import { fetchWithAuth } from '../../lib/api';
 import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
-import { ArrowLeft, Save, Trash2, Send, ChevronDown, Sparkles, Check, X, Download, Copy, Printer, Share2 } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Send, ChevronDown, Sparkles, Check, X, Download, Copy, Printer, Share2, Globe, BookOpen } from "lucide-react";
 import * as LucideIcons from "lucide-react";
 import { saveAs } from "file-saver";
 import { ContextualSidebar } from "../../components/writing/ContextualSidebar";
@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { WritingStatus } from "../../types";
 import { useToastStore } from "../../store/toastStore";
 import { scanTextForEntities, autoLinkSingleEntity } from "../../utils/autoLinker";
+import { PublishWebhookModal } from "../../components/publishing/PublishWebhookModal";
+import { ExportLiteraryModal } from "../../components/publishing/ExportLiteraryModal";
 
 const WRITING_PIPELINE: { id: WritingStatus; label: string }[] = [
   { id: 'idea', label: 'Ide' },
@@ -41,6 +43,8 @@ export function WritingDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [isPublishWebhookOpen, setIsPublishWebhookOpen] = useState(false);
+  const [isLiteraryExportOpen, setIsLiteraryExportOpen] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<{ tags: string[], icon: string } | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
@@ -296,11 +300,34 @@ ${content}
                       <span>Unduh Berkas (.md)</span>
                     </button>
                     <button
+                      onClick={() => {
+                        setIsExportMenuOpen(false);
+                        setIsLiteraryExportOpen(true);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <BookOpen className="w-4 h-4 text-gray-500" />
+                      <span>Ekspor Literer (PDF &amp; HTML)</span>
+                    </button>
+                    <button
                       onClick={handlePrintDocument}
                       className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
                     >
                       <Printer className="w-4 h-4 text-gray-500" />
-                      <span>Cetak / Simpan PDF</span>
+                      <span>Cetak Cepat Halaman</span>
+                    </button>
+                    <div className="px-3 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wider font-mono border-t border-b border-gray-100 mt-1">
+                      Penerbitan
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsExportMenuOpen(false);
+                        setIsPublishWebhookOpen(true);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <Globe className="w-4 h-4 text-gray-500" />
+                      <span>Terbitkan via Webhook</span>
                     </button>
                   </div>
                 )}
@@ -408,6 +435,20 @@ ${content}
           <Button variant="destructive" onClick={handleDelete} className="bg-gray-900 hover:bg-gray-800 text-white">Hapus Draf</Button>
         </DialogFooter>
       </Dialog>
+
+      <PublishWebhookModal
+        isOpen={isPublishWebhookOpen}
+        onClose={() => setIsPublishWebhookOpen(false)}
+        draft={draft}
+      />
+
+      <ExportLiteraryModal
+        isOpen={isLiteraryExportOpen}
+        onClose={() => setIsLiteraryExportOpen(false)}
+        draft={draft}
+        currentTitle={title}
+        currentContent={content}
+      />
     </div>
   );
 }

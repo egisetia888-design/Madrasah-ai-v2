@@ -10,6 +10,7 @@ import { useLibraryStore } from "../../store/libraryStore";
 import { useKnowledgeStore } from "../../store/knowledgeStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog";
 import { ProvenanceBadge } from "../../components/ui/ProvenanceBadge";
+import { ReliabilityBadge, RELIABILITY_LEVELS } from "../../components/ui/ReliabilityBadge";
 import { NoteStatus, NoteType, EpistemicDomain } from "../../types";
 import { MarkdownRenderer } from "../../components/ui/MarkdownRenderer";
 import { useToastStore } from "../../store/toastStore";
@@ -99,6 +100,12 @@ export function NoteDetailPage() {
   const [selectedFragment, setSelectedFragment] = useState<string>("");
   const [relationType, setRelationType] = useState<string>("references");
 
+  // New fragment creation state
+  const [fragmentTab, setFragmentTab] = useState<'create' | 'existing'>('create');
+  const [newFragmentQuote, setNewFragmentQuote] = useState<string>("");
+  const [newFragmentLocation, setNewFragmentLocation] = useState<string>("");
+  const [newFragmentReliability, setNewFragmentReliability] = useState<number>(1.0);
+
   const handleLinkConcept = () => {
     if (!selectedConcept) return;
     addRelation({
@@ -122,6 +129,30 @@ export function NoteDetailPage() {
       createdBy: 'user',
       verifiedBySystem: true,
     });
+    setIsLinkFragmentOpen(false);
+    setSelectedFragment("");
+  };
+
+  const handleCreateAndLinkFragment = () => {
+    if (!newFragmentQuote.trim()) return;
+    const fragmentId = addSourceFragment({
+      sourceId: note.sourceId || null,
+      quote: newFragmentQuote.trim(),
+      location: newFragmentLocation.trim() || "Lokasi rujukan umum",
+      reliabilityScore: newFragmentReliability,
+    });
+    addRelation({
+      sourceNodeId: note.id,
+      targetNodeId: fragmentId,
+      relationType: 'references',
+      confidenceScore: 1.0,
+      createdBy: 'user',
+      verifiedBySystem: true,
+      explanation: 'Fragmen sumber ditautkan ke catatan',
+    });
+    setNewFragmentQuote("");
+    setNewFragmentLocation("");
+    setNewFragmentReliability(1.0);
     setIsLinkFragmentOpen(false);
   };
   const [aiSuggestions, setAiSuggestions] = useState<{ tags: string[], icon: string } | null>(null);
@@ -592,6 +623,7 @@ export function NoteDetailPage() {
                           <MarkdownRenderer>{lf.fragment.quote}</MarkdownRenderer>
                           <div className="flex items-center gap-2 mt-2">
                             <span className="text-xs text-gray-400 not-italic font-sans">— {lf.fragment.location}</span>
+                            <ReliabilityBadge score={lf.fragment.reliabilityScore} />
                             <ProvenanceBadge relation={lf.relation} />
                           </div>
                         </blockquote>
@@ -663,6 +695,7 @@ export function NoteDetailPage() {
                       <p className="text-sm italic text-gray-700 font-serif line-clamp-2">"{lf.fragment.quote}"</p>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-gray-400">{lf.fragment.location}</span>
+                        <ReliabilityBadge score={lf.fragment.reliabilityScore} />
                         <ProvenanceBadge relation={lf.relation} />
                       </div>
                     </div>
@@ -755,24 +788,117 @@ export function NoteDetailPage() {
         <DialogHeader>
           <DialogTitle>Tautkan Source Fragment</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Source Fragment</label>
-            <select
-              value={selectedFragment}
-              onChange={(e) => setSelectedFragment(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900"
-            >
-              <option value="">-- Pilih Fragment --</option>
-              {sourceFragments.map(f => (
-                <option key={f.id} value={f.id}>{f.quote.substring(0, 50)}...</option>
-              ))}
-            </select>
-          </div>
+
+        <div className="flex border-b border-gray-100 mt-2">
+          <button
+            type="button"
+            onClick={() => setFragmentTab('create')}
+            className={`flex-1 py-2 text-xs font-medium text-center border-b-2 transition-colors ${
+              fragmentTab === 'create'
+                ? 'border-gray-900 text-gray-900 font-semibold'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Buat Fragmen Baru
+          </button>
+          <button
+            type="button"
+            onClick={() => setFragmentTab('existing')}
+            className={`flex-1 py-2 text-xs font-medium text-center border-b-2 transition-colors ${
+              fragmentTab === 'existing'
+                ? 'border-gray-900 text-gray-900 font-semibold'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Pilih Yang Sudah Ada ({sourceFragments.length})
+          </button>
         </div>
+
+        {fragmentTab === 'create' ? (
+          <div className="space-y-4 py-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Kutipan / Matan Teks Asli
+              </label>
+              <textarea
+                value={newFragmentQuote}
+                onChange={(e) => setNewFragmentQuote(e.target.value)}
+                rows={4}
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 text-sm font-serif placeholder:font-sans"
+                placeholder="Tuliskan atau tempelkan kutipan teks asli di sini..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Lokasi Rujukan / Sitasi
+              </label>
+              <input
+                type="text"
+                value={newFragmentLocation}
+                onChange={(e) => setNewFragmentLocation(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 text-sm"
+                placeholder="Contoh: Bab 2, Hal. 45 atau Jilid 1, Hal. 102"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Tingkat Keandalan Sumber (Ta'dib Epistemologi)
+              </label>
+              <select
+                value={newFragmentReliability}
+                onChange={(e) => setNewFragmentReliability(parseFloat(e.target.value))}
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 text-sm bg-white"
+              >
+                {RELIABILITY_LEVELS.map((level) => (
+                  <option key={level.score} value={level.score}>
+                    {level.label} ({level.score.toFixed(1)}) — {level.description}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1 font-mono">
+                Penetapan sadar atas derajat kekuatan dalil / referensi.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 py-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Source Fragment</label>
+              {sourceFragments.length === 0 ? (
+                <p className="text-xs text-gray-500 py-3 text-center border border-dashed border-gray-200 rounded-xl">
+                  Belum ada fragmen sumber terdaftar. Beralih ke tab "Buat Fragmen Baru" untuk membuat kutipan pertama.
+                </p>
+              ) : (
+                <select
+                  value={selectedFragment}
+                  onChange={(e) => setSelectedFragment(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 text-sm"
+                >
+                  <option value="">-- Pilih Fragment --</option>
+                  {sourceFragments.map(f => (
+                    <option key={f.id} value={f.id}>
+                      [{f.location || 'Tanpa rujukan'}] {f.quote.substring(0, 60)}...
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+        )}
+
         <DialogFooter>
           <Button variant="ghost" onClick={() => setIsLinkFragmentOpen(false)}>Batal</Button>
-          <Button onClick={handleLinkFragment} disabled={!selectedFragment}>Tautkan</Button>
+          {fragmentTab === 'create' ? (
+            <Button onClick={handleCreateAndLinkFragment} disabled={!newFragmentQuote.trim()}>
+              Simpan &amp; Tautkan
+            </Button>
+          ) : (
+            <Button onClick={handleLinkFragment} disabled={!selectedFragment}>
+              Tautkan
+            </Button>
+          )}
         </DialogFooter>
       </Dialog>
       

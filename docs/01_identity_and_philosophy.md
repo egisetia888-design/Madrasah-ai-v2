@@ -7,7 +7,7 @@
 | Atribut | Nilai Resmi | Keterangan |
 | :--- | :--- | :--- |
 | **Nama Aplikasi** | Madrasah | Personal Knowledge Operating System (PKOS) |
-| **Versi Rilis** | `v1.0.0-beta` | Versi stabil saat ini (Agustus 2026) |
+| **Versi Rilis** | `v1.2.5-beta` | Versi stabil saat ini (September 2026) |
 | **Kreator / Pemilik**| **egiistw88** | Pengembang utama dan arsitek produk |
 | **Motto Keilmuan** | *"Tuntutlah ilmu dari buaian hingga ke liang lahat."* | Hadits Riwayat / Atsar Salafus Shalih |
 | **Identitas Visual**| Ikon Otak (*Brain*) | Simbol Otak Kedua, kognisi mandiri, dan kristalisasi ilmu |

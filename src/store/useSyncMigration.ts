@@ -6,6 +6,7 @@ import { useProjectsStore } from './projectsStore';
 import { useWritingStore } from './writingStore';
 import { useReviewStore } from './reviewStore';
 import { createSyncMetadata } from './syncUtils';
+import { backfillUnverifiedAiRelations } from '../utils/dataMigration';
 
 export function useSyncMigration() {
   useEffect(() => {
@@ -70,7 +71,16 @@ export function useSyncMigration() {
     migrateNotes();
     migrateKnowledge();
     migrateLibrary();
-    // Similar for other stores if needed...
     
+    // Ta'dib backfill migration for unverified AI relations
+    try {
+      const backfillKey = 'madrasah_ai_relation_backfill_v1';
+      if (!localStorage.getItem(backfillKey)) {
+        backfillUnverifiedAiRelations();
+        localStorage.setItem(backfillKey, 'true');
+      }
+    } catch (e) {
+      console.warn('Failed to run AI relation backfill', e);
+    }
   }, []);
 }

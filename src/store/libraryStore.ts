@@ -1,32 +1,15 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import localforage from 'localforage';
-import { Book, Author, Category } from '../types';
+import { Book, Author, Category, ReadingLog, SyncMetadata } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
-import { SyncMetadata } from '../types';
-import { syncSaveBook, syncDeleteBook } from '../lib/firestoreSync';
-
-localforage.config({
-  name: 'madrasah_db',
-  storeName: 'library_store'
-});
-
-const storage = {
-  getItem: async (name: string): Promise<string | null> => {
-    return (await localforage.getItem(name)) || null;
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    await localforage.setItem(name, value);
-  },
-  removeItem: async (name: string): Promise<void> => {
-    await localforage.removeItem(name);
-  },
-};
+import { syncSaveBook, syncDeleteBook, syncSaveReadingLog, syncDeleteReadingLog } from '../lib/firestoreSync';
+import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface LibraryState {
   books: Book[];
   authors: Author[];
   categories: Category[];
+  readingLogs: ReadingLog[];
   
   // Actions
   addBook: (book: Omit<Book, 'id' | 'createdAt' | keyof SyncMetadata>) => string;
@@ -35,6 +18,9 @@ interface LibraryState {
   
   addAuthor: (name: string) => string; // returns new ID
   addCategory: (name: string) => string;
+
+  addReadingLog: (log: Omit<ReadingLog, 'id' | 'createdAt' | keyof SyncMetadata>) => string;
+  deleteReadingLog: (id: string) => void;
 }
 
 export const useLibraryStore = create<LibraryState>()(
@@ -43,6 +29,7 @@ export const useLibraryStore = create<LibraryState>()(
       books: [],
       authors: [],
       categories: [],
+      readingLogs: [],
       
       addBook: (bookData) => {
         const id = crypto.randomUUID();
@@ -51,7 +38,6 @@ export const useLibraryStore = create<LibraryState>()(
           id,
           createdAt: Date.now(),
           ...createSyncMetadata(),
-          
         };
         set((state) => ({
           books: [newBook, ...state.books]
@@ -76,7 +62,9 @@ export const useLibraryStore = create<LibraryState>()(
       
       deleteBook: (id) => {
         set((state) => ({
-          books: state.books.filter(b => b.id !== id)
+          books: state.books.filter(b => b.id !== id),
+          // Also clean up reading logs for deleted book
+          readingLogs: (state.readingLogs || []).filter(l => l.bookId !== id)
         }));
         syncDeleteBook(id);
       },
@@ -95,12 +83,33 @@ export const useLibraryStore = create<LibraryState>()(
           categories: [...state.categories, { id, name, createdAt: Date.now(), ...createSyncMetadata() }]
         }));
         return id;
-      }
+      },
+
+      addReadingLog: (logData) => {
+        const id = crypto.randomUUID();
+        const newLog: ReadingLog = {
+          ...logData,
+          id,
+          createdAt: Date.now(),
+          ...createSyncMetadata(),
+        };
+        set((state) => ({
+          readingLogs: [newLog, ...(state.readingLogs || [])]
+        }));
+        syncSaveReadingLog(newLog);
+        return id;
+      },
+
+      deleteReadingLog: (id) => {
+        set((state) => ({
+          readingLogs: (state.readingLogs || []).filter(l => l.id !== id)
+        }));
+        syncDeleteReadingLog(id);
+      },
     }),
     {
       name: 'madrasah-library-storage-v2',
-      storage: createJSONStorage(() => storage),
+      storage: createJSONStorage(() => createIndexedDbStorage('library_store')),
     }
   )
 );
-

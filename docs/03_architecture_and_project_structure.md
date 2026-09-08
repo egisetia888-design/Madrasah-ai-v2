@@ -36,7 +36,8 @@
 ### 1. Sisi Klien (Frontend Client)
 Aplikasi klien dibangun menggunakan **React 18+** dan dikompilasi menggunakan **Vite 6**. Seluruh pengelolaan status aplikasi (*global state*) dikonsolidasikan menggunakan **Zustand**. Keuntungan pola ini adalah:
 - **Keringanan & Kepatuhan**: Zustand tidak memerlukan pembungkus *Provider* berlebih, meminimalkan rendering ulang yang tidak perlu.
-- **Dual Persistence Strategy**: Data disimpan langsung di peramban menggunakan `localStorage` untuk kecepatan instan, dan dapat disinkronkan secara mulus ke cloud Firestore untuk keamanan jangka panjang.
+- **Ketahanan Penyimpanan Offline (IndexedDB Engine)**: Data disimpan di peramban menggunakan IndexedDB (didukung `localforage` dengan isolasi per-store) untuk melewati batas 5MB `localStorage`, dengan migrasi otomatis data lawas dan fallback yang aman.
+- **Dual Persistence Strategy**: Data lokal disinkronkan secara mulus ke cloud Firestore dengan Optimistic Concurrency Control (OCC) untuk keamanan jangka panjang.
 - **Ergonomi Sentuh & Responsivitas**: Dilengkapi dengan hook penanganan gesture sentuh dan bilah tab gulir bebas hambatan (`no-scrollbar`).
 - **Ketahanan Fatal & Notifikasi (Resilience & Toast)**: Dilengkapi dengan `ErrorBoundary` level akar dan pencegat kejadian *runtime* global via pustaka *toast* `sonner` untuk menampilkan jejak *error* transparan kepada pengguna tanpa memecah konsol peramban secara sunyi.
 
@@ -56,10 +57,15 @@ Struktur direktori Madrasah diorganisasikan secara modular untuk memastikan skal
 
 ```
 /remix-madrasah
-├── .env.example              # Template konfigurasi variabel lingkungan (HCNSEC, Gemini, OpenRouter)
+├── .env.example              # Template konfigurasi variabel lingkungan lengkap (Gemini, OpenRouter, Firebase)
 ├── AGENTS.md                 # Aturan baku dan batasan AI Coding Agent
 ├── README.md                 # Gerbang utama dan panduan cepat proyek
-├── server.ts                 # Server Express.js (entry point backend full-stack)
+├── vercel.json               # Konfigurasi deployment Vercel (rewrites, functions, caching)
+├── server.ts                 # Standalone Node.js Express server (Cloud Run / Docker / Local)
+├── api/                      # Vercel Serverless Functions
+│   └── index.ts              # Titik masuk Serverless Function untuk Vercel
+├── server/                   # Inti aplikasi backend
+│   └── app.ts                # Logika Express terpusat (middleware, AI routing, audit, webhook)
 ├── package.json              # Dependensi, skrip dev, build esbuild, dan start
 ├── vite.config.ts            # Konfigurasi pembangun Vite
 ├── tsconfig.json             # Konfigurasi TypeScript compiler ketat
@@ -89,8 +95,9 @@ Struktur direktori Madrasah diorganisasikan secara modular untuk memastikan skal
     │   ├── authStore.ts      # Autentikasi dan profil pengguna
     │   ├── curriculumStore.ts# Kurikulum dan fase belajar
     │   ├── graphStore.ts     # Konfigurasi simpul dan filter graf
+    │   ├── indexedDbStorage.ts # Wrapper IndexedDB terisolasi (localforage)
     │   ├── knowledgeStore.ts # Konsep atomik dan hubungan semantik
-    │   ├── libraryStore.ts   # Katalog pustaka buku dan penulis
+    │   ├── libraryStore.ts   # Pustaka buku, penulis, dan riwayat sesi baca
     │   ├── notesStore.ts     # Zettelkasten notes dan inbox
     │   ├── projectsStore.ts  # Proyek dan daftar tugas terstruktur
     │   ├── reviewStore.ts    # Dek flashcard dan algoritma SM-2

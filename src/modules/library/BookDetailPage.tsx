@@ -22,6 +22,9 @@ export function BookDetailPage() {
   const updateBook = useLibraryStore(state => state.updateBook);
   const deleteBook = useLibraryStore(state => state.deleteBook);
   const addAuthor = useLibraryStore(state => state.addAuthor);
+  const readingLogs = useLibraryStore(state => state.readingLogs || []);
+  const addReadingLog = useLibraryStore(state => state.addReadingLog);
+  const deleteReadingLog = useLibraryStore(state => state.deleteReadingLog);
   
   const notes = useNotesStore(state => state.notes);
   const addNote = useNotesStore(state => state.addNote);
@@ -33,6 +36,12 @@ export function BookDetailPage() {
   const updateToast = useToastStore(state => state.updateToast);
   
   const book = books.find(b => b.id === id);
+
+  const bookReadingLogs = useMemo(() => {
+    return readingLogs
+      .filter(log => log.bookId === id)
+      .sort((a, b) => b.date - a.date);
+  }, [readingLogs, id]);
   
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -184,12 +193,28 @@ export function BookDetailPage() {
   
   const handleUpdateProgress = (e: any) => {
     e.preventDefault();
+    if (!book) return;
     const newProgress = parseInt(updateProgress);
     if (!isNaN(newProgress) && newProgress >= 0) {
+      const oldProgress = book.progress || 0;
+      const pagesDiff = newProgress - oldProgress;
+
       updateBook(book.id, { 
         progress: newProgress,
         status: book.totalPages && newProgress >= book.totalPages ? 'finished' : book.status === 'finished' ? 'reading' : book.status
       });
+
+      if (pagesDiff > 0) {
+        addReadingLog({
+          bookId: book.id,
+          date: Date.now(),
+          pagesRead: pagesDiff,
+          startPage: oldProgress,
+          endPage: newProgress,
+        });
+        addToast({ type: 'success', message: `+${pagesDiff} halaman dicatat dalam riwayat baca!` });
+      }
+
       setIsProgressOpen(false);
     }
   };
@@ -374,6 +399,59 @@ export function BookDetailPage() {
                  <Edit2 className="w-3.5 h-3.5" /> Catat Progres Membaca
                </Button>
              </div>
+          </div>
+
+          <div className="p-6 border border-gray-200 rounded-2xl bg-white space-y-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider flex items-center gap-2">
+                <Clock className="w-4 h-4 text-gray-700"/> Riwayat Sesi Baca ({bookReadingLogs.length})
+              </h3>
+            </div>
+
+            {bookReadingLogs.length > 0 ? (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {bookReadingLogs.slice(0, 8).map((log) => (
+                  <div key={log.id} className="p-2.5 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-between text-xs">
+                    <div className="min-w-0 pr-2">
+                      <div className="flex items-center gap-1.5 font-medium text-gray-900">
+                        <span className="font-mono bg-gray-900 text-white px-1.5 py-0.5 rounded text-[11px]">
+                          +{log.pagesRead} hal
+                        </span>
+                        <span className="text-gray-500 font-mono text-[11px]">
+                          (hal. {log.startPage} → {log.endPage})
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        {new Date(log.date).toLocaleDateString('id-ID', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => deleteReadingLog(log.id)}
+                      title="Hapus catatan sesi ini"
+                      className="text-gray-300 hover:text-gray-600 p-1 rounded transition-colors shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+                {bookReadingLogs.length > 8 && (
+                  <p className="text-[11px] text-gray-400 text-center pt-1">
+                    Menampilkan 8 sesi terbaru dari total {bookReadingLogs.length} sesi
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 italic">
+                Belum ada riwayat sesi. Setiap penambahan halaman membaca akan tercatat otomatis di sini.
+              </p>
+            )}
           </div>
           
           <div className="p-6 border border-gray-200 rounded-2xl bg-white space-y-4 shadow-sm">
@@ -605,6 +683,21 @@ export function BookDetailPage() {
               />
               {book.totalPages && (
                 <p className="text-xs text-gray-500">Dari total {book.totalPages} halaman.</p>
+              )}
+              {updateProgress !== "" && !isNaN(parseInt(updateProgress)) && (
+                <div className="p-2.5 rounded-xl bg-gray-50 border border-gray-100 text-xs">
+                  {parseInt(updateProgress) > (book.progress || 0) ? (
+                    <p className="text-gray-900 font-medium">
+                      +<span className="font-mono font-semibold">{parseInt(updateProgress) - (book.progress || 0)}</span> halaman akan otomatis dicatat ke riwayat sesi baca.
+                    </p>
+                  ) : parseInt(updateProgress) < (book.progress || 0) ? (
+                    <p className="text-gray-500">
+                      Koreksi mundur ({parseInt(updateProgress)} hal) tidak akan dicatat sebagai sesi membaca baru.
+                    </p>
+                  ) : (
+                    <p className="text-gray-500">Halaman sama dengan posisi baca saat ini ({book.progress} hal).</p>
+                  )}
+                </div>
               )}
             </div>
           </DialogContent>

@@ -7,6 +7,7 @@ import { useAuthStore } from "../../store/authStore"
 import { useNotesStore } from "../../store/notesStore"
 import { useWritingStore } from "../../store/writingStore"
 import { PWAInstallButton } from "../PWAInstallButton"
+import { GlobalSyncBadge } from "../ui/GlobalSyncBadge"
 
 const workspaceItems = [
   { name: "Beranda", href: "/", icon: LayoutDashboard },
@@ -101,7 +102,10 @@ export function MobileNav() {
                   <span className="text-white font-bold text-lg font-display">M</span>
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-gray-900 tracking-tight font-display">Madrasah</h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-gray-900 tracking-tight font-display">Madrasah</h2>
+                    <GlobalSyncBadge compact />
+                  </div>
                   <p className="text-xs text-gray-500">Personal Knowledge OS</p>
                 </div>
               </div>

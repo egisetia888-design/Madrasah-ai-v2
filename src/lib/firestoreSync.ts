@@ -1,6 +1,6 @@
 import { doc, setDoc, deleteDoc, onSnapshot, collection, query, where, runTransaction } from 'firebase/firestore';
 import { db, auth, isFirebaseConfigured, handleFirestoreError, OperationType } from './firebase';
-import { Note, Draft, Project, Book, SyncMetadata, Concept, SourceFragment, Relation, LearningPath, Phase, Competency, Deck, Flashcard } from '../types';
+import { Note, Draft, Project, Book, SyncMetadata, Concept, SourceFragment, Relation, LearningPath, Phase, Competency, Deck, Flashcard, ReadingLog } from '../types';
 import { useNotesStore } from '../store/notesStore';
 import { useWritingStore } from '../store/writingStore';
 import { useProjectsStore } from '../store/projectsStore';
@@ -8,6 +8,7 @@ import { useLibraryStore } from '../store/libraryStore';
 import { useKnowledgeStore } from '../store/knowledgeStore';
 import { useCurriculumStore } from '../store/curriculumStore';
 import { useReviewStore } from '../store/reviewStore';
+import { useSyncStateStore } from '../store/syncStateStore';
 
 function mergeCloudData<T extends { id: string } & SyncMetadata>(
   localItems: T[],
@@ -47,10 +48,27 @@ function mergeCloudData<T extends { id: string } & SyncMetadata>(
 
 export function initFirestoreSync() {
   if (!isFirebaseConfigured || !auth || !db) {
+    useSyncStateStore.getState().setStatus('local_only');
     return;
   }
   const firebaseAuth = auth;
   const firestoreDb = db;
+
+  // Listen to network status
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+      if (firebaseAuth.currentUser) {
+        useSyncStateStore.getState().setStatus('syncing');
+        setTimeout(() => useSyncStateStore.getState().setStatus('synced'), 800);
+      } else {
+        useSyncStateStore.getState().setStatus('local_only');
+      }
+    });
+
+    window.addEventListener('offline', () => {
+      useSyncStateStore.getState().setStatus('offline');
+    });
+  }
 
   let unsubscribeNotes: (() => void) | null = null;
   let unsubscribeDrafts: (() => void) | null = null;
@@ -64,6 +82,7 @@ export function initFirestoreSync() {
   let unsubscribeCompetencies: (() => void) | null = null;
   let unsubscribeDecks: (() => void) | null = null;
   let unsubscribeFlashcards: (() => void) | null = null;
+  let unsubscribeReadingLogs: (() => void) | null = null;
 
   firebaseAuth.onAuthStateChanged((user) => {
     if (unsubscribeNotes) unsubscribeNotes();
@@ -78,7 +97,14 @@ export function initFirestoreSync() {
     if (unsubscribeCompetencies) unsubscribeCompetencies();
     if (unsubscribeDecks) unsubscribeDecks();
     if (unsubscribeFlashcards) unsubscribeFlashcards();
-    if (!user) return;
+    if (unsubscribeReadingLogs) unsubscribeReadingLogs();
+    
+    if (!user) {
+      useSyncStateStore.getState().setStatus('local_only');
+      return;
+    }
+
+    useSyncStateStore.getState().setStatus(navigator.onLine ? 'synced' : 'offline');
 
     const createUnsubscriber = <T extends { id: string } & SyncMetadata>(
       collectionName: string,
@@ -94,8 +120,16 @@ export function initFirestoreSync() {
           if (cloudItems.length > 0) {
             storeSetter(mergeCloudData(storeGetter(), cloudItems));
           }
+          useSyncStateStore.getState().setLastSyncedAt(Date.now());
         },
-        (error) => handleFirestoreError(error, OperationType.GET, collectionName)
+        (error) => {
+          if (!navigator.onLine) {
+            useSyncStateStore.getState().setStatus('offline');
+          } else {
+            useSyncStateStore.getState().setStatus('error', error?.message || 'Gagal sinkronisasi');
+          }
+          handleFirestoreError(error, OperationType.GET, collectionName);
+        }
       );
     };
 
@@ -147,6 +181,10 @@ export function initFirestoreSync() {
       (merged) => useReviewStore.setState({ flashcards: merged }),
       () => useReviewStore.getState().flashcards
     );
+    unsubscribeReadingLogs = createUnsubscriber<ReadingLog>('readingLogs',
+      (merged) => useLibraryStore.setState({ readingLogs: merged }),
+      () => useLibraryStore.getState().readingLogs || []
+    );
   });
 }
 
@@ -161,6 +199,8 @@ async function syncWithOCC<T extends { id: string } & SyncMetadata>(
   if (!user) return;
   const path = `${collectionName}/${item.id}`;
   const firestoreDb = db;
+
+  useSyncStateStore.getState().setStatus('syncing');
 
   try {
     await runTransaction(firestoreDb, async (transaction) => {
@@ -186,9 +226,14 @@ async function syncWithOCC<T extends { id: string } & SyncMetadata>(
     });
 
     setStateCallback(item.id, { syncStatus: 'synced' } as Partial<T>);
+    useSyncStateStore.getState().setLastSyncedAt(Date.now());
   } catch (err) {
-    if (err instanceof Error && err.message === 'Conflict detected') return;
+    if (err instanceof Error && err.message === 'Conflict detected') {
+      useSyncStateStore.getState().setStatus('synced');
+      return;
+    }
     setStateCallback(item.id, { syncStatus: 'failed' } as Partial<T>);
+    useSyncStateStore.getState().setStatus('error', 'Gagal menyimpan perubahan ke Cloud');
     handleFirestoreError(err, OperationType.WRITE, path);
   }
 }
@@ -198,9 +243,12 @@ async function syncDeleteWithDoc(collectionName: string, id: string) {
   const user = auth.currentUser;
   if (!user) return;
   const firestoreDb = db;
+  useSyncStateStore.getState().setStatus('syncing');
   try {
     await deleteDoc(doc(firestoreDb, collectionName, id));
+    useSyncStateStore.getState().setLastSyncedAt(Date.now());
   } catch (err) {
+    useSyncStateStore.getState().setStatus('error', 'Gagal menghapus data dari Cloud');
     handleFirestoreError(err, OperationType.DELETE, `${collectionName}/${id}`);
   }
 }
@@ -349,6 +397,18 @@ export async function syncDeleteFlashcard(flashcardId: string) {
   await syncDeleteWithDoc('flashcards', flashcardId);
 }
 
+export async function syncSaveReadingLog(log: ReadingLog) {
+  await syncWithOCC('readingLogs', log, (id, updates) => {
+    useLibraryStore.setState(state => ({
+      readingLogs: (state.readingLogs || []).map(l => l.id === id ? { ...l, ...updates } : l)
+    }));
+  });
+}
+
+export async function syncDeleteReadingLog(logId: string) {
+  await syncDeleteWithDoc('readingLogs', logId);
+}
+
 export async function syncAllLocalToCloud(): Promise<{ total: number; successCount: number }> {
   if (!isFirebaseConfigured || !auth || !db) {
     throw new Error("Firebase belum dikonfigurasi di environment aplikasi.");
@@ -362,6 +422,7 @@ export async function syncAllLocalToCloud(): Promise<{ total: number; successCou
   const drafts = useWritingStore.getState().drafts;
   const projects = useProjectsStore.getState().projects;
   const books = useLibraryStore.getState().books;
+  const readingLogs = useLibraryStore.getState().readingLogs || [];
   const concepts = useKnowledgeStore.getState().concepts;
   const fragments = useKnowledgeStore.getState().sourceFragments;
   const relations = useKnowledgeStore.getState().relations;
@@ -372,7 +433,7 @@ export async function syncAllLocalToCloud(): Promise<{ total: number; successCou
   const flashcards = useReviewStore.getState().flashcards;
 
   const total = notes.length + drafts.length + projects.length + books.length +
-    concepts.length + fragments.length + relations.length + paths.length +
+    readingLogs.length + concepts.length + fragments.length + relations.length + paths.length +
     phases.length + competencies.length + decks.length + flashcards.length;
 
   let successCount = 0;
@@ -381,6 +442,7 @@ export async function syncAllLocalToCloud(): Promise<{ total: number; successCou
   for (const d of drafts) { await syncSaveDraft(d); successCount++; }
   for (const p of projects) { await syncSaveProject(p); successCount++; }
   for (const b of books) { await syncSaveBook(b); successCount++; }
+  for (const rl of readingLogs) { await syncSaveReadingLog(rl); successCount++; }
   for (const c of concepts) { await syncSaveConcept(c); successCount++; }
   for (const f of fragments) { await syncSaveSourceFragment(f); successCount++; }
   for (const r of relations) { await syncSaveRelation(r); successCount++; }

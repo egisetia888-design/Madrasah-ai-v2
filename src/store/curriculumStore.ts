@@ -1,27 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import localforage from 'localforage';
 import { LearningPath, Phase, Competency } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
 import { syncSaveLearningPath, syncDeleteLearningPath, syncSavePhase, syncDeletePhase, syncSaveCompetency, syncDeleteCompetency } from '../lib/firestoreSync';
 import { SyncMetadata } from '../types';
-
-localforage.config({
-  name: 'madrasah_db',
-  storeName: 'curriculum_store'
-});
-
-const storage = {
-  getItem: async (name: string): Promise<string | null> => {
-    return (await localforage.getItem(name)) || null;
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    await localforage.setItem(name, value);
-  },
-  removeItem: async (name: string): Promise<void> => {
-    await localforage.removeItem(name);
-  },
-};
+import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface CurriculumState {
   paths: LearningPath[];
@@ -144,7 +127,7 @@ export const useCurriculumStore = create<CurriculumState>()(
     }),
     {
       name: 'madrasah-curriculum-storage-v2',
-      storage: createJSONStorage(() => storage),
+      storage: createJSONStorage(() => createIndexedDbStorage('curriculum_store')),
     }
   )
 );

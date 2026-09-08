@@ -3,7 +3,7 @@
 | Atribut | Nilai |
 | :--- | :--- |
 | **Jenis Dokumen** | Product Requirements Document (PRD) — fitur tambahan |
-| **Cakupan** | Ditambahkan di atas Madrasah v1.0.0-beta yang sudah shipped. Berbagi satu titik UI dengan `docs/10_tadib_layer_prd.md` (lihat §6, FR3 di dokumen ini menggunakan ulang FR3 di doc 10 — tidak menduplikasi). |
+| **Cakupan** | Ditambahkan di atas Madrasah v1.2.5-beta yang sudah shipped. Berbagi satu titik UI dengan `docs/10_tadib_layer_prd.md` (lihat §6, FR3 di dokumen ini menggunakan ulang FR3 di doc 10 — tidak menduplikasi). |
 | **Prasyarat baca** | `docs/01_identity_and_philosophy.md` §1.4 (prinsip Gesekan Minimal), `docs/04_modules_and_features.md`, `docs/10_tadib_layer_prd.md` |
 | **Status** | Final — siap masuk roadmap Fase 1.5B. |
 

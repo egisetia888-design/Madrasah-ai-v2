@@ -1,27 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import localforage from 'localforage';
 import { Concept, SourceFragment, Relation } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
 import { syncSaveConcept, syncDeleteConcept, syncSaveSourceFragment, syncDeleteSourceFragment, syncSaveRelation, syncDeleteRelation } from '../lib/firestoreSync';
 import { SyncMetadata } from '../types';
-
-localforage.config({
-  name: 'madrasah_db',
-  storeName: 'knowledge_store'
-});
-
-const storage = {
-  getItem: async (name: string): Promise<string | null> => {
-    return (await localforage.getItem(name)) || null;
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    await localforage.setItem(name, value);
-  },
-  removeItem: async (name: string): Promise<void> => {
-    await localforage.removeItem(name);
-  },
-};
+import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface KnowledgeState {
   concepts: Concept[];
@@ -169,7 +152,7 @@ export const useKnowledgeStore = create<KnowledgeState>()(
     }),
     {
       name: 'madrasah-knowledge-storage',
-      storage: createJSONStorage(() => storage),
+      storage: createJSONStorage(() => createIndexedDbStorage('knowledge_store')),
     }
   )
 );

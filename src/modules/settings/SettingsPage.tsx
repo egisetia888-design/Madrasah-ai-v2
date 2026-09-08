@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Database, Download, Upload, Trash2, AlertTriangle, CheckCircle2, PlayCircle, FileText, Search, BrainCircuit, RefreshCw, Layers, Cloud, CloudOff, User, LogIn, LogOut, AlertCircle } from 'lucide-react';
+import { Database, Download, Upload, Trash2, AlertTriangle, CheckCircle2, PlayCircle, FileText, Search, BrainCircuit, RefreshCw, Layers, Cloud, CloudOff, User, LogIn, LogOut, AlertCircle, Globe, Key, Send } from 'lucide-react';
 import localforage from 'localforage';
 import { Button } from '../../components/ui/Button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/Dialog';
@@ -7,13 +7,15 @@ import { useTourStore } from '../../store/tourStore';
 import { useNotesStore } from '../../store/notesStore';
 import { useLibraryStore } from '../../store/libraryStore';
 import { useWritingStore } from '../../store/writingStore';
-import { migrateNotesToFragments } from '../../utils/dataMigration';
+import { usePublishingStore } from '../../store/publishingStore';
+import { migrateNotesToFragments, backfillUnverifiedAiRelations } from '../../utils/dataMigration';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { isFirebaseConfigured } from '../../lib/firebase';
 import { useAuthStore } from '../../store/authStore';
 import { syncAllLocalToCloud } from '../../lib/firestoreSync';
 import { useToastStore } from '../../store/toastStore';
+import { GlobalSyncBadge } from '../../components/ui/GlobalSyncBadge';
 
 export function SettingsPage() {
   const [exportStatus, setExportStatus] = useState<string | null>(null);
@@ -88,6 +90,78 @@ export function SettingsPage() {
     } catch (err) {
       console.error(err);
       setMigrationStatus("Terjadi kesalahan saat memigrasi data.");
+    }
+  };
+
+  const [aiBackfillStatus, setAiBackfillStatus] = useState<string | null>(null);
+
+  const handleAiRelationBackfill = () => {
+    try {
+      const count = backfillUnverifiedAiRelations();
+      if (count > 0) {
+        setAiBackfillStatus(`Berhasil menormalkan ${count} relasi AI ke status 'belum diverifikasi'.`);
+      } else {
+        setAiBackfillStatus("Semua relasi AI sudah mematuhi kaidah Ta'dib (tidak ada anomali).");
+      }
+      setTimeout(() => setAiBackfillStatus(null), 5000);
+    } catch (err) {
+      console.error(err);
+      setAiBackfillStatus("Terjadi kesalahan saat memeriksa relasi AI.");
+    }
+  };
+
+  const publishingSettings = usePublishingStore();
+  const [webhookUrlInput, setWebhookUrlInput] = useState(publishingSettings.webhookUrl);
+  const [webhookSecretInput, setWebhookSecretInput] = useState(publishingSettings.webhookSecret);
+  const [serviceNameInput, setServiceNameInput] = useState(publishingSettings.serviceName);
+  const [testWebhookStatus, setTestWebhookStatus] = useState<string | null>(null);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+
+  const handleSavePublishing = () => {
+    publishingSettings.setPublishingSettings({
+      webhookUrl: webhookUrlInput.trim(),
+      webhookSecret: webhookSecretInput.trim(),
+      serviceName: serviceNameInput.trim(),
+    });
+    addToast({ type: 'success', message: 'Konfigurasi webhook penerbitan berhasil disimpan.' });
+  };
+
+  const handleTestWebhook = async () => {
+    const cleanUrl = webhookUrlInput.trim();
+    if (!cleanUrl) {
+      addToast({ type: 'error', message: 'Masukkan target Webhook URL terlebih dahulu.' });
+      return;
+    }
+    setIsTestingWebhook(true);
+    setTestWebhookStatus('Mengirim sinyal uji (ping) ke endpoint...');
+    try {
+      const response = await fetch('/api/publishing/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetUrl: cleanUrl,
+          secret: webhookSecretInput.trim() || undefined,
+          payload: {
+            event: 'webhook.ping',
+            source: 'Madrasah Personal Knowledge OS',
+            timestamp: new Date().toISOString(),
+            message: 'Uji konektivitas webhook Madrasah.',
+          },
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setTestWebhookStatus(`Koneksi Berhasil! Respons: HTTP ${data.status} ${data.statusText || 'OK'}`);
+        addToast({ type: 'success', message: `Uji webhook berhasil (HTTP ${data.status}).` });
+      } else {
+        setTestWebhookStatus(`Koneksi Gagal: ${data.error || 'Endpoint menolak koneksi'}`);
+        addToast({ type: 'error', message: data.error || 'Gagal terhubung ke webhook.' });
+      }
+    } catch (err: any) {
+      setTestWebhookStatus(`Gagal: ${err.message || 'Kesalahan jaringan'}`);
+      addToast({ type: 'error', message: err.message || 'Kesalahan jaringan.' });
+    } finally {
+      setIsTestingWebhook(false);
     }
   };
 
@@ -484,6 +558,33 @@ export function SettingsPage() {
                 )}
               </div>
             </div>
+
+            <div className="mt-6 pt-6 border-t border-gray-100 flex flex-col md:flex-row gap-6 items-start">
+              <div className="flex-1">
+                <h3 className="text-sm font-medium text-gray-900 mb-1">Audit &amp; Backfill Relasi AI (Kaidah Ta'dib)</h3>
+                <p className="text-sm text-gray-600 mb-2">
+                  Memeriksa dan menormalkan seluruh relasi graf yang dibuat oleh AI. Menjamin tidak ada relasi buatan AI yang berstatus <em>terverifikasi sistem</em> sebelum ada konfirmasi eksplisit dari Anda.
+                </p>
+                <p className="text-xs text-gray-500">
+                  Relasi yang belum ditinjau akan ditandai dengan lencana <span className="font-mono text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded text-[10px]">AI · belum diverifikasi</span> pada visualisasi Graf dan Catatan.
+                </p>
+              </div>
+              <div className="w-full md:w-auto shrink-0 space-y-2">
+                <Button 
+                  onClick={handleAiRelationBackfill} 
+                  variant="outline" 
+                  className="w-full gap-2 text-gray-900 border-gray-200 hover:bg-gray-50"
+                >
+                  <BrainCircuit className="w-4 h-4" />
+                  Audit Relasi AI
+                </Button>
+                {aiBackfillStatus && (
+                  <p className="text-[10px] text-gray-900 flex items-center gap-1 justify-center md:justify-start">
+                    <CheckCircle2 className="w-3 h-3 text-gray-500" /> {aiBackfillStatus}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </section>
 
@@ -491,11 +592,14 @@ export function SettingsPage() {
           <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Cloud className="w-5 h-5 text-gray-500" />
-              <h2 className="text-lg font-medium text-gray-900 font-display">Sinkronisasi Cloud & Multi-Perangkat (Firestore)</h2>
+              <h2 className="text-lg font-medium text-gray-900 font-display">Sinkronisasi Cloud &amp; Multi-Perangkat (Firestore)</h2>
             </div>
-            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-mono font-medium ${isFirebaseConfigured ? 'bg-gray-100 text-gray-800' : 'bg-gray-100 text-gray-500'}`}>
-              {isFirebaseConfigured ? 'Firebase Aktif' : 'Firebase Offline'}
-            </span>
+            <div className="flex items-center gap-2">
+              <GlobalSyncBadge />
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-mono font-medium ${isFirebaseConfigured ? 'bg-gray-100 text-gray-800' : 'bg-gray-100 text-gray-500'}`}>
+                {isFirebaseConfigured ? 'Firebase Aktif' : 'Firebase Offline'}
+              </span>
+            </div>
           </div>
           <div className="p-6 space-y-6">
             <p className="text-sm text-gray-600 leading-relaxed">
@@ -571,6 +675,96 @@ export function SettingsPage() {
                 <span>{cloudSyncStatus}</span>
               </div>
             )}
+          </div>
+        </section>
+
+        <section className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Globe className="w-5 h-5 text-gray-500" />
+              <h2 className="text-lg font-medium text-gray-900 font-display">Penerbitan Pihak Ketiga &amp; Webhook</h2>
+            </div>
+            <span className="text-xs font-mono text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
+              Fase 3 Ekosistem
+            </span>
+          </div>
+          <div className="p-6 space-y-6">
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Integrasikan Studio Menulis Madrasah dengan platform publikasi mandiri Anda (seperti Ghost, Medium, Static Site Generator via GitHub Actions, atau server webhook personal). Saat Anda memicu publikasi pada draf tulisan, payload artikel terstruktur akan dikirim secara aman via HTTP POST.
+            </p>
+
+            <div className="space-y-4 max-w-2xl">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 uppercase tracking-wider mb-1">
+                  Nama Platform / Sasaran
+                </label>
+                <input
+                  type="text"
+                  value={serviceNameInput}
+                  onChange={(e) => setServiceNameInput(e.target.value)}
+                  placeholder="Contoh: Blog Pribadi Ghost, Hugo Webhook, Medium API"
+                  className="w-full text-sm bg-white border border-gray-200 rounded-xl px-3 py-2 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 uppercase tracking-wider mb-1">
+                  Target Webhook URL
+                </label>
+                <div className="relative">
+                  <input
+                    type="url"
+                    value={webhookUrlInput}
+                    onChange={(e) => setWebhookUrlInput(e.target.value)}
+                    placeholder="https://your-domain.com/api/webhooks/publish"
+                    className="w-full text-sm font-mono bg-white border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-900"
+                  />
+                  <Globe className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 uppercase tracking-wider mb-1">
+                  Secret Key / Bearer Token <span className="text-gray-400 font-normal">(Opsional)</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="password"
+                    value={webhookSecretInput}
+                    onChange={(e) => setWebhookSecretInput(e.target.value)}
+                    placeholder="Token otorisasi rahasia jika diperlukan oleh endpoint"
+                    className="w-full text-sm font-mono bg-white border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-900"
+                  />
+                  <Key className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <Button
+                  onClick={handleSavePublishing}
+                  className="gap-2 bg-gray-900 text-white hover:bg-gray-800 min-h-[44px] md:min-h-[36px]"
+                >
+                  <Send className="w-4 h-4" />
+                  Simpan Konfigurasi
+                </Button>
+                <Button
+                  onClick={handleTestWebhook}
+                  disabled={isTestingWebhook}
+                  variant="outline"
+                  className="gap-2 text-gray-900 border-gray-200 hover:bg-gray-50 min-h-[44px] md:min-h-[36px]"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isTestingWebhook ? 'animate-spin' : ''}`} />
+                  {isTestingWebhook ? 'Menguji...' : 'Uji Koneksi (Test Webhook)'}
+                </Button>
+              </div>
+
+              {testWebhookStatus && (
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-800 font-mono flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-gray-600 shrink-0" />
+                  <span>{testWebhookStatus}</span>
+                </div>
+              )}
+            </div>
           </div>
         </section>
 

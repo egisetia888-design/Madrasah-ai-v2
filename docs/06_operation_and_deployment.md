@@ -84,3 +84,78 @@ Untuk menyalakan server di lingkungan produksi, jalankan perintah:
 npm run start
 ```
 Perintah ini mengeksekusi **`node dist/server.cjs`**. Server ini akan beroperasi mandiri pada port **3000** di host **0.0.0.0** untuk menerima lalu lintas masuk, melayani berkas statis frontend dari `/dist`, serta menyediakan rute API `/api/*` secara berkinerja tinggi.
+
+---
+
+## 6.5 Panduan Deployment ke Vercel (Serverless Architecture)
+
+Proyek Madrasah kini mendukung penuh arsitektur deployment modern ke **Vercel** tanpa ketergantungan pada Google AI Studio maupun server fisik jangka panjang.
+
+### 1. Struktur Arsitektur Vercel
+Proyek menggunakan arsitektur hibrida berkinerja tinggi:
+- **Frontend SPA**: Dibangun menggunakan `vite build` dan disajikan langsung melalui Vercel Global Edge CDN dari direktori `dist/`. Seluruh aset statis (PWA icon, font, chunk JS/CSS) di-cache secara instan.
+- **Backend API (Serverless Function)**: Diarahkan ke titik masuk tunggal **`api/index.ts`** yang membungkus aplikasi Express (`server/app.ts`). Vercel secara otomatis mengompilasi dan mengisolasi fungsi ini sebagai serverless invocation dengan batas waktu eksekusi hingga 60 detik (`maxDuration: 60`).
+- **Penyelarasan Rute (`vercel.json`)**:
+  ```json
+  {
+    "$schema": "https://openapi.vercel.sh/vercel.json",
+    "framework": "vite",
+    "outputDirectory": "dist",
+    "functions": {
+      "api/index.ts": {
+        "maxDuration": 60,
+        "memory": 1024
+      }
+    },
+    "rewrites": [
+      { "source": "/api/(.*)", "destination": "/api" },
+      { "source": "/(.*)", "destination": "/index.html" }
+    ]
+  }
+  ```
+- **Proteksi Stream Serverless**: `server/app.ts` dilengkapi middleware pendeteksi `req.body` pre-parsed dari runtime Vercel, mencegah _hang / 504 Gateway Timeout_ yang sering terjadi saat Express berjalan di atas platform serverless.
+
+### 2. Langkah-Langkah Deploy ke Vercel
+
+1. **Hubungkan Repositori Git**:
+   - Buka dashboard [Vercel](https://vercel.com).
+   - Klik **Add New...** > **Project**.
+   - Pilih repositori Git proyek Madrasah Anda (GitHub / GitLab / Bitbucket).
+
+2. **Pengaturan Framework & Build**:
+   - **Framework Preset**: Pilih `Vite` (Vercel akan mendeteksi `vite` secara otomatis melalui `vercel.json`).
+   - **Root Directory**: `./` (akar proyek).
+   - **Build Command**: Biarkan default `npm run build` (atau `vite build`).
+   - **Output Directory**: `dist`.
+
+3. **Konfigurasi Environment Variables di Vercel**:
+   Pada menu **Environment Variables**, tambahkan variabel kunci berikut (sesuai `.env.example`):
+   - `GEMINI_API_KEY`: Kunci API Google Gemini untuk fungsionalitas AI.
+   - `GEMINI_MODEL`: `gemini-2.5-flash` (opsional).
+   - `OPENROUTER_API_KEY`: Kunci OpenRouter (opsional).
+   - `APP_URL`: URL domain Vercel Anda (misal: `https://madrasah-pwa.vercel.app`).
+   - *(Jika menggunakan sinkronisasi Firebase)*:
+     - `VITE_FIREBASE_API_KEY`
+     - `VITE_FIREBASE_AUTH_DOMAIN`
+     - `VITE_FIREBASE_PROJECT_ID`
+     - `VITE_FIREBASE_STORAGE_BUCKET`
+     - `VITE_FIREBASE_MESSAGING_SENDER_ID`
+     - `VITE_FIREBASE_APP_ID`
+     - `VITE_FIREBASE_FIRESTORE_DATABASE_ID`
+
+4. **Eksekusi Deploy**:
+   - Klik tombol **Deploy**.
+   - Vercel akan mengunduh paket dependensi, mengompilasi aset Vite, memaketkan Serverless Function `api/index.ts`, dan merilis aplikasi Anda secara global.
+
+5. **Verifikasi Operasional**:
+   - Akses `https://<domain-anda>.vercel.app/api/health` di peramban atau terminal.
+   - Respons sukses:
+     ```json
+     {
+       "status": "ok",
+       "service": "madrasah-api",
+       "timestamp": 1788898323686,
+       "environment": "vercel"
+     }
+     ```
+   - Semua rute kecerdasan buatan (`/api/ai/*`) dan rute penulisan webhook (`/api/publishing/webhook`) siap melayani permintaan secara mulus.

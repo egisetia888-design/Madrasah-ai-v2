@@ -3,7 +3,7 @@
 > **Personal Knowledge Operating System (PKOS) — Monochrome Slate Edition**
 
 ```
-Versi: v1.0.0-beta  |  Kreator: egiistw88  |  Lisensi: © 2026 Madrasah OS
+Versi: v1.2.5-beta  |  Kreator: egiistw88  |  Lisensi: © 2026 Madrasah OS
 Motto: "Tuntutlah ilmu dari buaian hingga ke liang lahat." (Hadits Riwayat)
 ```
 

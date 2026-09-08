@@ -1,27 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import localforage from 'localforage';
 import { Deck, Flashcard } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
 import { syncSaveDeck, syncDeleteDeck, syncSaveFlashcard, syncDeleteFlashcard } from '../lib/firestoreSync';
 import { SyncMetadata } from '../types';
-
-localforage.config({
-  name: 'madrasah_db',
-  storeName: 'review_store'
-});
-
-const storage = {
-  getItem: async (name: string): Promise<string | null> => {
-    return (await localforage.getItem(name)) || null;
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    await localforage.setItem(name, value);
-  },
-  removeItem: async (name: string): Promise<void> => {
-    await localforage.removeItem(name);
-  },
-};
+import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface ReviewState {
   decks: Deck[];
@@ -124,7 +107,7 @@ export const useReviewStore = create<ReviewState>()(
     }),
     {
       name: 'madrasah-review-storage-v2',
-      storage: createJSONStorage(() => storage),
+      storage: createJSONStorage(() => createIndexedDbStorage('review_store')),
     }
   )
 );

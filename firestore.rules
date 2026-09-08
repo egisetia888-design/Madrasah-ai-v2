@@ -113,6 +113,14 @@ service cloud.firestore {
         && data.dueDate is number;
     }
 
+    function validReadingLog(data) {
+      return data.bookId is string
+        && data.date is number
+        && data.pagesRead is number
+        && data.startPage is number
+        && data.endPage is number;
+    }
+
     // Default deny.
     match /{document=**} {
       allow read, write: if false;
@@ -155,6 +163,15 @@ service cloud.firestore {
         && validTitleDoc(request.resource.data);
       allow update: if validUpdate(request.resource.data, resource.data)
         && validTitleDoc(request.resource.data);
+      allow delete: if isOwner(resource.data);
+    }
+
+    match /readingLogs/{docId} {
+      allow read: if isOwner(resource.data);
+      allow create: if validCreate(request.resource.data, docId)
+        && validReadingLog(request.resource.data);
+      allow update: if validUpdate(request.resource.data, resource.data)
+        && validReadingLog(request.resource.data);
       allow delete: if isOwner(resource.data);
     }
 

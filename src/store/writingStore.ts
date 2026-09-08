@@ -1,28 +1,11 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import localforage from 'localforage';
 import { Draft } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
 import { SyncMetadata } from '../types';
 import { generateEmbedding } from '../lib/semanticSearch';
 import { syncSaveDraft, syncDeleteDraft } from '../lib/firestoreSync';
-
-localforage.config({
-  name: 'madrasah_db',
-  storeName: 'writing_store'
-});
-
-const storage = {
-  getItem: async (name: string): Promise<string | null> => {
-    return (await localforage.getItem(name)) || null;
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    await localforage.setItem(name, value);
-  },
-  removeItem: async (name: string): Promise<void> => {
-    await localforage.removeItem(name);
-  },
-};
+import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface WritingState {
   drafts: Draft[];
@@ -105,7 +88,7 @@ export const useWritingStore = create<WritingState>()(
     }),
     {
       name: 'madrasah-writing-storage-v2',
-      storage: createJSONStorage(() => storage),
+      storage: createJSONStorage(() => createIndexedDbStorage('writing_store')),
     }
   )
 );

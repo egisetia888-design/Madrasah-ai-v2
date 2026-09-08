@@ -12,3 +12,4 @@ firebase_applet_config.xml
 .vite/
 .cache/
 *.local
+.vercel/

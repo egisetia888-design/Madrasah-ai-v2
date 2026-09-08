@@ -3,14 +3,16 @@ import { SyncStatusIndicator } from '../../components/ui/SyncStatusIndicator';
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "../../components/ui/Button"
-import { Plus, Search, Map, Milestone, MoreVertical, Sparkles } from "lucide-react"
+import { Plus, Search, Map, Milestone, MoreVertical, Sparkles, Upload } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog"
 import { useCurriculumStore } from "../../store/curriculumStore"
 import { useToastStore } from "../../store/toastStore"
+import { ImportCurriculumModal } from "../../components/curriculum/ImportCurriculumModal"
 
 export function CurriculumPage() {
   const navigate = useNavigate()
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [isImportOpen, setIsImportOpen] = useState(false)
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   
@@ -114,12 +116,16 @@ export function CurriculumPage() {
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 font-display">Kurikulum</h1>
           <p className="text-gray-500 mt-1 text-xs sm:text-sm">Kelola peta jalan belajar dan progres Anda.</p>
         </div>
-        <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
-          <Button variant="outline" className="gap-2 h-11 sm:h-9" onClick={() => setIsAiOpen(true)}>
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <Button variant="outline" className="gap-2 h-11 sm:h-9 border-gray-200 text-gray-700 hover:bg-gray-50" onClick={() => setIsImportOpen(true)}>
+            <Upload className="w-4 h-4 text-gray-500" />
+            <span>Impor Silabus</span>
+          </Button>
+          <Button variant="outline" className="gap-2 h-11 sm:h-9 border-gray-200 text-gray-700 hover:bg-gray-50" onClick={() => setIsAiOpen(true)}>
             <Sparkles className="w-4 h-4 text-gray-700" />
             <span>AI Planner</span>
           </Button>
-          <Button className="gap-2 h-11 sm:h-9" onClick={() => setIsAddOpen(true)}>
+          <Button className="gap-2 h-11 sm:h-9 bg-gray-900 text-white hover:bg-gray-800" onClick={() => setIsAddOpen(true)}>
             <Plus className="w-4 h-4" />
             <span>Kurikulum Baru</span>
           </Button>
@@ -261,6 +267,11 @@ export function CurriculumPage() {
           </DialogFooter>
         </form>
       </Dialog>
+
+      <ImportCurriculumModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+      />
     </div>
   )
 }

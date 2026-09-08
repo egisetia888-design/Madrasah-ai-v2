@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
-import { ArrowLeft, Plus, MoreVertical, BookOpen, PenTool, Brain, Target, CheckCircle2, ChevronRight, Circle, Trash2, Edit2, Save, Network, ArrowUpRight, FileText } from "lucide-react";
+import { ArrowLeft, Plus, MoreVertical, BookOpen, PenTool, Brain, Target, CheckCircle2, ChevronRight, Circle, Trash2, Edit2, Save, Network, ArrowUpRight, FileText, Share2 } from "lucide-react";
 import { useCurriculumStore } from "../../store/curriculumStore";
 import { useLibraryStore } from "../../store/libraryStore";
 import { useWritingStore } from "../../store/writingStore";
@@ -10,6 +10,7 @@ import { useNotesStore } from "../../store/notesStore";
 import { useToastStore } from "../../store/toastStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog";
 import { scanTextForEntities, autoLinkSingleEntity, createExplicitRelation } from "../../utils/autoLinker";
+import { ShareCurriculumModal } from "../../components/curriculum/ShareCurriculumModal";
 
 export function PathDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -52,6 +53,7 @@ export function PathDetailPage() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   if (!path) {
     return (
@@ -265,9 +267,20 @@ export function PathDetailPage() {
       <div className="space-y-8">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold text-gray-900">Peta Kurikulum</h2>
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => setIsAddPhaseOpen(true)}>
-            <Plus className="w-4 h-4" /> Tambah Fase
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 text-gray-700 border-gray-200 hover:bg-gray-50 h-9"
+              onClick={() => setIsShareModalOpen(true)}
+            >
+              <Share2 className="w-4 h-4 text-gray-500" />
+              <span className="hidden sm:inline">Bagikan Silabus</span>
+            </Button>
+            <Button size="sm" className="gap-2 bg-gray-900 text-white hover:bg-gray-800 h-9" onClick={() => setIsAddPhaseOpen(true)}>
+              <Plus className="w-4 h-4" /> Tambah Fase
+            </Button>
+          </div>
         </div>
 
         {phases.length === 0 ? (
@@ -546,6 +559,15 @@ export function PathDetailPage() {
           <Button variant="ghost" onClick={() => setIsManageCompOpen(false)}>Selesai</Button>
         </DialogFooter>
       </Dialog>
+
+      <ShareCurriculumModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        path={path}
+        phases={phases}
+        competencies={competencies.filter((c) => phases.some((p) => p.id === c.phaseId))}
+        books={books}
+      />
     </div>
   );
 }

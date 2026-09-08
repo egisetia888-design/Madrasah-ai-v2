@@ -45,6 +45,17 @@ export interface Book extends SyncMetadata {
   createdAt: number;
 }
 
+export interface ReadingLog extends SyncMetadata {
+  id: UUID;
+  bookId: UUID;
+  date: number; // timestamp
+  pagesRead: number;
+  startPage: number;
+  endPage: number;
+  notes?: string;
+  createdAt: number;
+}
+
 export interface BookInfoResponse {
   totalPages: number;
   coverUrl: string;
