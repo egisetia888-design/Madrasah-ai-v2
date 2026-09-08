@@ -289,6 +289,32 @@
         "name"
       ]
     },
+    "ReadingLog": {
+      "title": "ReadingLog",
+      "description": "User reading log entity",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "bookId": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "pagesRead": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "userId",
+        "bookId"
+      ]
+    },
     "Flashcard": {
       "title": "Flashcard",
       "description": "User flashcard entity",
@@ -386,6 +412,12 @@
         "$ref": "#/entities/Flashcard"
       },
       "description": "Flashcards"
+    },
+    "/readingLogs/{logId}": {
+      "schema": {
+        "$ref": "#/entities/ReadingLog"
+      },
+      "description": "Reading Logs"
     }
   }
 }
