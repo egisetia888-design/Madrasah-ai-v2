@@ -3,7 +3,14 @@ import { getAnalytics, isSupported, type Analytics } from 'firebase/analytics';
 import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, type Firestore } from 'firebase/firestore';
 
-import firebaseAppletConfig from '../../firebase-applet-config.json';
+// firebase-applet-config.json hanya ada di dalam Google AI Studio (di-gitignore).
+// import.meta.glob membuat import ini opsional — kalau filenya tidak ada,
+// Vite cukup mengembalikan objek kosong, bukan gagal build.
+const appletConfigModules = import.meta.glob<{ default: Record<string, string> }>(
+  '../../firebase-applet-config.json',
+  { eager: true }
+);
+const firebaseAppletConfig = Object.values(appletConfigModules)[0]?.default;
 
 const rawConfig: any = firebaseAppletConfig || {};
 
