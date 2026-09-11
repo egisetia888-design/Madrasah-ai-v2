@@ -1,0 +1,57 @@
+diff --git a/src/components/ui/Toaster.tsx b/src/components/ui/Toaster.tsx
+index cbd958f..2ac6c8e 100644
+--- a/src/components/ui/Toaster.tsx
++++ b/src/components/ui/Toaster.tsx
+@@ -2,6 +2,19 @@ import { useToastStore } from '../../store/toastStore';
+ import { Loader2, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+ import { cn } from '../../utils/cn';
+ 
++// Beberapa endpoint AI kadang mengirim balik objek error (mis. { code, message })
++// alih-alih string biasa. React tidak bisa me-render objek langsung, jadi kita
++// jaga di sini agar Toaster tidak pernah menyebabkan crash total aplikasi.
++function toDisplayMessage(message: unknown): string {
++  if (typeof message === 'string') return message;
++  if (message && typeof message === 'object') {
++    const m = message as any;
++    if (typeof m.message === 'string') return m.message;
++    try { return JSON.stringify(m); } catch { /* fall through */ }
++  }
++  return String(message);
++}
++
+ export function Toaster() {
+   const toasts = useToastStore((state) => state.toasts);
+   const removeToast = useToastStore((state) => state.removeToast);
+@@ -25,7 +38,7 @@ export function Toaster() {
+             {toast.type === 'info' && <Info className="w-5 h-5 text-gray-700" />}
+           </div>
+           <div className="flex-1 text-sm font-medium text-gray-900">
+-            {toast.message}
++            {toDisplayMessage(toast.message)}
+           </div>
+           <button
+             onClick={() => removeToast(toast.id)}
+diff --git a/src/modules/library/LibraryPage.tsx b/src/modules/library/LibraryPage.tsx
+index 7471618..4c23491 100644
+--- a/src/modules/library/LibraryPage.tsx
++++ b/src/modules/library/LibraryPage.tsx
+@@ -51,7 +51,8 @@ export function LibraryPage() {
+         let errMsg = 'Gagal mencari info buku.';
+         try {
+           const text = await res.text();
+-          errMsg = JSON.parse(text).error || errMsg;
++          const parsedErr = JSON.parse(text).error;
++          errMsg = typeof parsedErr === 'string' ? parsedErr : (parsedErr?.message || errMsg);
+         } catch(e){}
+         updateToast(toastId, { type: 'error', message: errMsg });
+         return;
+@@ -80,7 +81,8 @@ export function LibraryPage() {
+             } else if (parsed.type === "result") {
+               finalData = parsed.data;
+             } else if (parsed.type === "error") {
+-              updateToast(toastId, { type: 'error', message: parsed.error });
++              const errText = typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message || 'Gagal mencari info buku.');
++              updateToast(toastId, { type: 'error', message: errText });
+               return;
+             }
+           } catch (e) {

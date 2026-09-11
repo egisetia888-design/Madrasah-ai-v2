@@ -51,7 +51,8 @@ export function LibraryPage() {
         let errMsg = 'Gagal mencari info buku.';
         try {
           const text = await res.text();
-          errMsg = JSON.parse(text).error || errMsg;
+          const parsedErr = JSON.parse(text).error;
+          errMsg = typeof parsedErr === 'string' ? parsedErr : (parsedErr?.message || errMsg);
         } catch(e){}
         updateToast(toastId, { type: 'error', message: errMsg });
         return;
@@ -80,7 +81,8 @@ export function LibraryPage() {
             } else if (parsed.type === "result") {
               finalData = parsed.data;
             } else if (parsed.type === "error") {
-              updateToast(toastId, { type: 'error', message: parsed.error });
+              const errText = typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message || 'Gagal mencari info buku.');
+              updateToast(toastId, { type: 'error', message: errText });
               return;
             }
           } catch (e) {

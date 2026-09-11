@@ -2,6 +2,19 @@ import { useToastStore } from '../../store/toastStore';
 import { Loader2, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
+// Beberapa endpoint AI kadang mengirim balik objek error (mis. { code, message })
+// alih-alih string biasa. React tidak bisa me-render objek langsung, jadi kita
+// jaga di sini agar Toaster tidak pernah menyebabkan crash total aplikasi.
+function toDisplayMessage(message: unknown): string {
+  if (typeof message === 'string') return message;
+  if (message && typeof message === 'object') {
+    const m = message as any;
+    if (typeof m.message === 'string') return m.message;
+    try { return JSON.stringify(m); } catch { /* fall through */ }
+  }
+  return String(message);
+}
+
 export function Toaster() {
   const toasts = useToastStore((state) => state.toasts);
   const removeToast = useToastStore((state) => state.removeToast);
@@ -25,7 +38,7 @@ export function Toaster() {
             {toast.type === 'info' && <Info className="w-5 h-5 text-gray-700" />}
           </div>
           <div className="flex-1 text-sm font-medium text-gray-900">
-            {toast.message}
+            {toDisplayMessage(toast.message)}
           </div>
           <button
             onClick={() => removeToast(toast.id)}
