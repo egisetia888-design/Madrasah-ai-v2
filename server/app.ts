@@ -1084,6 +1084,32 @@ async function searchOpenLibraryDocs(query: string, timeoutMs = 7000): Promise<a
   }
 }
 
+function normalizeForMatch(s: string): string {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Skor 0-1 seberapa mirip dua judul/nama, berbasis kemiripan kata (bukan exact match),
+// supaya "Filsafat Ilmu" tidak salah dicocokkan dengan "Filsafat Ilmu Pengetahuan Modern" karya lain.
+function textSimilarity(query: string, candidate: string): number {
+  const q = normalizeForMatch(query);
+  const c = normalizeForMatch(candidate);
+  if (!q || !c) return 0;
+  if (q === c) return 1;
+  const qWords = q.split(" ").filter(w => w.length > 1);
+  if (qWords.length === 0) return 0;
+  const cWords = new Set(c.split(" ").filter(w => w.length > 1));
+  let overlap = 0;
+  for (const w of qWords) if (cWords.has(w)) overlap++;
+  const substringBonus = (c.includes(q) || q.includes(c)) ? 0.2 : 0;
+  return Math.min(1, overlap / qWords.length + substringBonus);
+}
+
 async function fetchFromOpenLibrary(title: string, author?: string): Promise<OpenLibraryBookResult | null> {
   const cleanTitle = String(title || "").trim();
   const cleanAuthor = String(author || "").trim();
@@ -1094,34 +1120,50 @@ async function fetchFromOpenLibrary(title: string, author?: string): Promise<Ope
   let bestTotalPages = 0;
   let bestAuthor = "";
 
+  const MATCH_THRESHOLD = 0.5;
+
   const extractFromDocs = (docs: any[]) => {
+    let bestScore = 0;
+    let bestDoc: any = null;
+
     for (let i = 0; i < Math.min(docs.length, 10); i++) {
       const doc = docs[i];
-      if (!doc) continue;
+      if (!doc || !doc.title) continue;
 
-      if (!bestAuthor && Array.isArray(doc.author_name) && doc.author_name.length > 0 && doc.author_name[0]) {
-        bestAuthor = String(doc.author_name[0]).trim();
+      let score = textSimilarity(cleanTitle, String(doc.title));
+      if (cleanAuthor && Array.isArray(doc.author_name)) {
+        const authorMatches = doc.author_name.some((a: string) => textSimilarity(cleanAuthor, String(a)) >= 0.5);
+        if (authorMatches) score += 0.3;
       }
 
-      if (!bestCoverUrl) {
-        if (doc.cover_i) {
-          bestCoverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
-        } else if (Array.isArray(doc.isbn) && doc.isbn.length > 0 && doc.isbn[0]) {
-          bestCoverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-L.jpg`;
-        }
+      if (score > bestScore) {
+        bestScore = score;
+        bestDoc = doc;
       }
+    }
 
-      if (bestTotalPages === 0) {
-        const rawPages = doc.number_of_pages_median ?? doc.number_of_pages ?? 0;
-        if (typeof rawPages === "number") {
-          bestTotalPages = Math.max(0, Math.round(rawPages));
-        } else if (typeof rawPages === "string") {
-          bestTotalPages = Math.max(0, parseInt(rawPages, 10) || 0);
-        }
+    // Hanya ambil data kalau ada satu dokumen yang cukup mirip — dan semua field
+    // (penulis, cover, halaman) diambil dari dokumen YANG SAMA, bukan dicampur.
+    if (!bestDoc || bestScore < MATCH_THRESHOLD) return;
+
+    if (!bestAuthor && Array.isArray(bestDoc.author_name) && bestDoc.author_name.length > 0 && bestDoc.author_name[0]) {
+      bestAuthor = String(bestDoc.author_name[0]).trim();
+    }
+
+    if (!bestCoverUrl) {
+      if (bestDoc.cover_i) {
+        bestCoverUrl = `https://covers.openlibrary.org/b/id/${bestDoc.cover_i}-L.jpg`;
+      } else if (Array.isArray(bestDoc.isbn) && bestDoc.isbn.length > 0 && bestDoc.isbn[0]) {
+        bestCoverUrl = `https://covers.openlibrary.org/b/isbn/${bestDoc.isbn[0]}-L.jpg`;
       }
+    }
 
-      if (bestCoverUrl && bestTotalPages > 0) {
-        break;
+    if (bestTotalPages === 0) {
+      const rawPages = bestDoc.number_of_pages_median ?? bestDoc.number_of_pages ?? 0;
+      if (typeof rawPages === "number") {
+        bestTotalPages = Math.max(0, Math.round(rawPages));
+      } else if (typeof rawPages === "string") {
+        bestTotalPages = Math.max(0, parseInt(rawPages, 10) || 0);
       }
     }
   };
@@ -1176,42 +1218,48 @@ async function fetchFromGoogleBooks(title: string, author?: string): Promise<Ope
 
     const data = await res.json() as any;
     if (data.items && data.items.length > 0) {
-      let bestTotalPages = 0;
-      let bestCoverUrl = "";
-      let bestAuthor = "";
+      let bestScore = 0;
+      let bestItem: any = null;
 
       for (const item of data.items) {
         const vol = item.volumeInfo;
-        if (!vol) continue;
+        if (!vol || !vol.title) continue;
 
-        if (!bestAuthor && vol.authors && Array.isArray(vol.authors) && vol.authors.length > 0) {
-          bestAuthor = String(vol.authors[0]).trim();
+        let score = textSimilarity(cleanTitle, String(vol.title));
+        if (cleanAuthor && Array.isArray(vol.authors)) {
+          const authorMatches = vol.authors.some((a: string) => textSimilarity(cleanAuthor, String(a)) >= 0.5);
+          if (authorMatches) score += 0.3;
         }
 
-        if (bestTotalPages === 0 && typeof vol.pageCount === "number" && vol.pageCount > 0) {
-          bestTotalPages = Math.round(vol.pageCount);
-        }
-
-        if (!bestCoverUrl && vol.imageLinks && vol.imageLinks.thumbnail) {
-          // Upgrade to https and use larger image if available by manipulating the URL
-          let thumb = String(vol.imageLinks.thumbnail).replace("http:", "https:");
-          thumb = thumb.replace("&edge=curl", "");
-          // zoom=1 is thumbnail, zoom=0 or omitting can be larger, but thumbnail is safe
-          bestCoverUrl = thumb;
-        }
-
-        if (bestTotalPages > 0 && bestCoverUrl && bestAuthor) {
-          break; // Found everything we need
+        if (score > bestScore) {
+          bestScore = score;
+          bestItem = item;
         }
       }
 
-      if (bestTotalPages > 0 || bestCoverUrl || bestAuthor) {
-        return {
-          totalPages: bestTotalPages,
-          coverUrl: bestCoverUrl,
-          author: bestAuthor || undefined,
-          isEstimated: false
-        };
+      // Semua field diambil dari SATU buku yang paling mirip judulnya, bukan dicampur
+      // dari beberapa buku berbeda di hasil pencarian.
+      if (bestItem && bestScore >= 0.5) {
+        const vol = bestItem.volumeInfo;
+        const bestAuthor = (vol.authors && Array.isArray(vol.authors) && vol.authors.length > 0)
+          ? String(vol.authors[0]).trim() : "";
+        const bestTotalPages = (typeof vol.pageCount === "number" && vol.pageCount > 0)
+          ? Math.round(vol.pageCount) : 0;
+        let bestCoverUrl = "";
+        if (vol.imageLinks && vol.imageLinks.thumbnail) {
+          let thumb = String(vol.imageLinks.thumbnail).replace("http:", "https:");
+          thumb = thumb.replace("&edge=curl", "");
+          bestCoverUrl = thumb;
+        }
+
+        if (bestTotalPages > 0 || bestCoverUrl || bestAuthor) {
+          return {
+            totalPages: bestTotalPages,
+            coverUrl: bestCoverUrl,
+            author: bestAuthor || undefined,
+            isEstimated: false
+          };
+        }
       }
     }
   } catch (err: any) {

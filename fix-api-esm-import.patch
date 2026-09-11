@@ -1,0 +1,10 @@
+diff --git a/api/index.ts b/api/index.ts
+index 8706c9a..300ffdf 100644
+--- a/api/index.ts
++++ b/api/index.ts
+@@ -1,4 +1,4 @@
+-import app from '../server/app';
++import app from '../server/app.js';
+ 
+ /**
+  * Vercel Serverless Function entry point.
