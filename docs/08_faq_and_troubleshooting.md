@@ -23,8 +23,10 @@ Dokumen ini dirancang untuk menjawab pertanyaan-pertanyaan yang sering diajukan 
 * **Gejala**: Saat mengklik tombol "Mulai Silabus AI", "Rekomendasi Tag", atau melakukan ulasan flashcard, aplikasi menampilkan pesan kesalahan atau animasi memuat berputar tanpa henti.
 * **Kemungkinan Penyebab**:
   1. Variabel `HCNSEC_API_KEY` atau `HCNSEC_BASE_URL` di dalam berkas `.env` server kosong atau tidak valid.
-  2. Server backend tidak mendeteksi file `.env` karena server dinyalakan sebelum file tersebut dibuat.
-  3. Kuota saldo pada akun provider AI Anda telah habis atau terkena pembatasan frekuensi (*Rate Limit*).
+  2. `HCNSEC_MODEL` masih mencantumkan model rusak upstream (`DeepSeek-V4-Pro` → 404 `openai_error`, `DeepSeek-V4-Flash`/`DeepSeek-V4.1-Flash` → timeout, `qwen3.8-max` → 500 no channel, `kimi-k3`/`MiniMax-M3` → tidak responsif). Server kini otomatis menyaringnya, tapi perbarui env ke `HCNSEC_MODEL=auto` agar Tier 1 langsung memakai model yang terbukti lolos beban berat.
+  3. Env di server/Vercel berbeda dengan `.env` lokal — pastikan `Settings > Environment Variables` ikut diperbarui lalu redeploy/restart.
+  4. Server backend tidak mendeteksi file `.env` karena server dinyalakan sebelum file tersebut dibuat.
+  5. Kuota saldo pada akun provider AI Anda telah habis atau terkena pembatasan frekuensi (*Rate Limit*).
 * **Solusi**:
   1. Buka berkas `.env` di komputer server Anda, pastikan isinya telah sesuai dengan template `.env.example`.
   2. Pastikan tidak ada spasi tambahan atau karakter tersembunyi di sekitar kunci API Anda.

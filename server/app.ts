@@ -165,6 +165,17 @@ interface AICallOptions {
   purpose?: string;
 }
 
+function parseModelList(rawValue: string | undefined, excluded: string[] = []): string[] {
+  if (!rawValue) return [];
+  return [...new Set(
+    rawValue
+      .split(/[,\n;]+/)
+      .flatMap((part: string) => part.split(/\s+/))
+      .map((m: string) => m.trim())
+      .filter((m: string) => m.length > 0 && !excluded.includes(m))
+  )];
+}
+
 function formatAIEndpoint(rawBaseUrl?: string): string {
   let url = (rawBaseUrl || "").trim();
   if (!url) return "https://openrouter.ai/api/v1/chat/completions";
@@ -197,22 +208,65 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
 
     if (hcnsecApiKey || hcnsecBaseUrl) {
       const apiKey = hcnsecApiKey || (process.env.OPENROUTER_API_KEY || "").trim();
+      const rawBase = (hcnsecBaseUrl || "").trim();
+      if (rawBase && !rawBase.startsWith("http://") && !rawBase.startsWith("https://")) {
+        console.warn(`[AI Provider: HCNSEC] HCNSEC_BASE_URL "${rawBase}" missing URL scheme, auto-prefixing https://.`);
+      }
+      if (!hcnsecApiKey) {
+        console.warn("[AI Provider: HCNSEC] HCNSEC_BASE_URL set but HCNSEC_API_KEY is empty; requests will likely fail with 401.");
+      }
       const endpoint = formatAIEndpoint(hcnsecBaseUrl);
 
-      // Model priority for HCNSEC:
-      // Verified active responsive models on api.hcnsec.cn: Qwen3.8-27B and DeepSeek-V4-Pro.
-      // Unresponsive upstream models (MiniMax-M3, kimi-k3) are excluded.
-      const configuredModel = (process.env.HCNSEC_MODEL || process.env.AI_MODEL || "").trim();
+      // Model priority for HCNSEC (verified live 2026-09-20 via /v1/models + chat probes):
+      // - Light load (<=~100 tokens out): Qwen3.8-27B (~2.4s), glm-5.3-flash (~2.4s),
+      //   Qwen3.8-Flash-Next (~4s), auto (~8.6s) all OK.
+      // - Heavy load (~2000 tokens JSON, syllabus): ONLY "auto" succeeds (~19s, valid JSON).
+      //   Qwen3.8-27B/DeepSeek-V4.1-Flash/glm-5.3 time out, glm-5.3-flash -> 524,
+      //   Qwen3.8-Flash-Next -> 500 no channel, step-3.7-flash -> truncated JSON.
+      // - Broken upstream (never auto-tried, always stripped from HCNSEC_MODEL):
+      //   DeepSeek-V4-Pro (404 openai_error), DeepSeek-V4-Flash / DeepSeek-V4.1-Flash
+      //   (timeout), qwen3.8-max (500 no channel). Permanently unresponsive: kimi-k3, MiniMax-M3.
+      // Hence purpose-aware ordering: heavy purposes try "auto" first; light purposes
+      // prefer the fastest model. HCNSEC_MODEL supports a comma/semicolon/space separated list.
+      const BROKEN_HCNSEC_MODELS = new Set(
+        ["kimi-k3", "minimax-m3", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4.1-flash", "qwen3.8-max"]
+      );
+      const excludedHcnsecModels = ["kimi-k3", "MiniMax-M3"];
+      const rawConfiguredModels = parseModelList(
+        process.env.HCNSEC_MODEL || process.env.AI_MODEL || "",
+        excludedHcnsecModels
+      );
+      // Strip broken upstream models case-insensitively so a stale server env
+      // (e.g. HCNSEC_MODEL=DeepSeek-V4-Pro,Qwen3.8-27B) can never trigger a 404 loop.
+      const configuredModels = rawConfiguredModels.filter((m) => {
+        if (BROKEN_HCNSEC_MODELS.has(m.toLowerCase())) {
+          console.warn(`[AI Provider: HCNSEC] Skipping known-broken model "${m}" from HCNSEC_MODEL.`);
+          return false;
+        }
+        return true;
+      });
+      const isHeavyPurpose = purpose === "generate-syllabus" || purpose === "generate-flashcards";
       const candidateModels: string[] = [];
-      
-      if (configuredModel && configuredModel !== "kimi-k3" && configuredModel !== "MiniMax-M3") {
-        candidateModels.push(configuredModel);
+
+      if (isHeavyPurpose && !candidateModels.includes("auto")) {
+        candidateModels.push("auto");
       }
-      if (!candidateModels.includes("Qwen3.8-27B")) {
-        candidateModels.push("Qwen3.8-27B");
+      for (const m of configuredModels) {
+        if (!candidateModels.includes(m)) candidateModels.push(m);
       }
-      if (!candidateModels.includes("DeepSeek-V4-Pro")) {
-        candidateModels.push("DeepSeek-V4-Pro");
+
+      const hcnsecFallbackModels = isHeavyPurpose
+        ? ["Qwen3.8-27B", "glm-5.3-flash"]
+        : [
+            "Qwen3.8-27B",
+            "glm-5.3-flash",
+            "Qwen3.8-Flash-Next",
+            "auto"
+          ];
+      for (const fallback of hcnsecFallbackModels) {
+        if (!candidateModels.includes(fallback)) {
+          candidateModels.push(fallback);
+        }
       }
 
       const messages = [
@@ -220,13 +274,19 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
         { role: "user", content: options.userPrompt }
       ];
 
-      for (const model of candidateModels) {
+      console.log(`[AI Provider: HCNSEC] Tier 1 attempt (${purpose}) endpoint=${endpoint} candidates=${candidateModels.join(", ") || "(none)"}`);
+
+      for (let modelIdx = 0; modelIdx < candidateModels.length; modelIdx++) {
+        const model = candidateModels[modelIdx];
         const remainingTime = timeoutMs - (Date.now() - startTime);
         if (remainingTime < 8000) break; // Reserve time for subsequent tiers
 
-        // Realistic per-model timeout to avoid starving subsequent providers
-        const maxModelTime = purpose === "generate-syllabus" ? 18000 : 12000;
-        const modelTimeout = Math.max(6000, Math.min(maxModelTime, remainingTime - 10000));
+        // Shorter per-model budget so a hung HCNSEC host cannot starve Tier 2/3.
+        // Fast 4xx errors just skip to next model. Heavy purposes (syllabus/flashcards)
+        // need a larger budget: only "auto" survives them (~19s), hence 30s budget.
+        const maxModelTime = isHeavyPurpose ? 30000 : 10000;
+        const reserveMs = isHeavyPurpose ? 15000 : 15000;
+        const modelTimeout = Math.max(5000, Math.min(maxModelTime, remainingTime - reserveMs));
         
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), modelTimeout);
@@ -273,15 +333,40 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
             }
           } else {
             const errText = await response.text();
-            console.warn(`[AI Provider: HCNSEC] Model ${model} returned status ${response.status}:`, errText.slice(0, 150));
+            const errPreview = errText.slice(0, 500);
+            const errLower = errText.toLowerCase();
+            if (response.status === 401 || response.status === 403) {
+              console.warn(`[AI Provider: HCNSEC] Model ${model} auth failed (${response.status}) at ${endpoint}:`, errPreview);
+              console.warn("[AI Provider: HCNSEC] Invalid API key — skipping remaining HCNSEC models, failing over to Tier 2...");
+              break;
+            }
+            if (response.status === 404 || response.status === 400 || errLower.includes("model_not_found") || errLower.includes("invalid_model") || errLower.includes("does not exist")) {
+              console.warn(`[AI Provider: HCNSEC] Model ${model} not found on upstream (${response.status}) at ${endpoint}:`, errPreview);
+              continue;
+            }
+            console.warn(`[AI Provider: HCNSEC] Model ${model} returned status ${response.status} at ${endpoint}:`, errPreview);
           }
         } catch (err: any) {
           clearTimeout(timer);
-          const isAborted = controller.signal.aborted || err?.name === 'AbortError' || String(err?.message).includes('aborted');
-          console.warn(`[AI Provider: HCNSEC] Model ${model} failed:`, err?.message || err);
+          const errMsg = String(err?.message || err || "");
+          const isAborted = controller.signal.aborted || err?.name === 'AbortError' || errMsg.includes('aborted');
+          console.warn(`[AI Provider: HCNSEC] Model ${model} failed:`, errMsg);
           if (isAborted) {
+            const hasNextModel = modelIdx < candidateModels.length - 1;
+            const timeAfterAbort = timeoutMs - (Date.now() - startTime);
+            // Heavy purposes must still reach "auto" (the only model surviving
+            // ~2000-token JSON); only fast-fail when no candidate remains or when
+            // continuing would starve Tier 2/3. Light purposes keep old fast-fail.
+            if (isHeavyPurpose && hasNextModel && timeAfterAbort > reserveMs + 8000) {
+              console.warn(`[AI Provider: HCNSEC] Model ${model} timed out after ${modelTimeout}ms — trying next HCNSEC candidate (${candidateModels[modelIdx + 1]})...`);
+              continue;
+            }
             console.warn(`[AI Provider: HCNSEC] Endpoint is unresponsive (timed out after ${modelTimeout}ms). Fast-failing HCNSEC to preserve time for Tier 2/3...`);
             break; // Fast-fail to Tier 2 immediately instead of hanging again on same host
+          }
+          if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|Failed to fetch|fetch failed|network/i.test(errMsg)) {
+            console.warn(`[AI Provider: HCNSEC] Network-level failure at ${endpoint} — skipping remaining HCNSEC models.`);
+            break;
           }
         }
       }
@@ -293,12 +378,10 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
     // =========================================================================
     if (process.env.OPENROUTER_API_KEY) {
       const orApiKey = process.env.OPENROUTER_API_KEY.trim();
-      const configuredOrModel = (process.env.OPENROUTER_MODEL || "").trim();
+      // OPENROUTER_MODEL also accepts a comma/semicolon/space separated list.
+      const configuredOrModels = parseModelList(process.env.OPENROUTER_MODEL || "", ["google/gemini-2.0-flash-001"]);
 
-      const orCandidateModels: string[] = [];
-      if (configuredOrModel && configuredOrModel !== "google/gemini-2.0-flash-001") {
-        orCandidateModels.push(configuredOrModel);
-      }
+      const orCandidateModels: string[] = [...configuredOrModels];
       orCandidateModels.push(
         "deepseek/deepseek-chat",
         "qwen/qwen-2.5-72b-instruct",
@@ -364,7 +447,7 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
             }
           } else {
             const errText = await response.text();
-            console.warn(`[AI Provider: OpenRouter] Model ${model} returned status ${response.status}:`, errText.slice(0, 150));
+            console.warn(`[AI Provider: OpenRouter] Model ${model} returned status ${response.status}:`, errText.slice(0, 500));
           }
         } catch (err: any) {
           clearTimeout(timer);
@@ -400,9 +483,8 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
 
         const geminiModels = [
           process.env.GEMINI_MODEL,
-          "gemini-3.8-flash",
-          "gemini-3.1-flash-lite",
-          "gemini-3.1-pro-preview"
+          "gemini-2.5-flash",
+          "gemini-2.0-flash"
         ].filter(Boolean) as string[];
         const uniqueGeminiModels = [...new Set(geminiModels)];
 

@@ -241,7 +241,8 @@ Server backend secara terstruktur memprioritaskan penyedia AI mandiri non-Gemini
 1. **Tier 1 — Provider Utama (HCNSEC / OpenAI-Compatible Provider)**:
    - Membaca `HCNSEC_API_KEY` (atau fallback ke kredensial OpenAI).
    - Format endpoint otomatis dinormalisasi ke `/chat/completions`.
-   - Urutan model kandidat adaptif: Memprioritaskan model aktif responsif (`Qwen3.8-27B`, `DeepSeek-V4-Pro`).
+   - Urutan model kandidat adaptif: `HCNSEC_MODEL` mendukung daftar koma (mis. `Qwen3.8-27B, glm-5.3-flash`), lalu fallback terverifikasi. Urutan bersifat purpose-aware (hasil uji beban 2026-09-20): beban berat (`generate-syllabus`, `generate-flashcards`) mencoba `auto` dulu — satu-satunya model yang lolos generasi ~2000 token (~19s, JSON valid); beban ringan memakai `Qwen3.8-27B` → `glm-5.3-flash` → `Qwen3.8-Flash-Next` → `auto`. Model yang rusak di upstream (`DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `DeepSeek-V4.1-Flash`, `qwen3.8-max`, `kimi-k3`, `MiniMax-M3`) otomatis disaring dari `HCNSEC_MODEL` (case-insensitive) dan tidak dipakai sebagai fallback otomatis.
+   - **Penanganan error per-status**: `404/400` (model tak dikenal) lanjut ke model berikut; `401/403` (key salah) langsung failover ke Tier 2; abort/timeout pada beban berat lanjut ke kandidat HCNSEC berikutnya (agar tetap mencapai `auto` dengan budget 30s per-model) dan hanya fast-fail bila kandidat habis atau sisa waktu menipis; beban ringan tetap fast-fail saat abort pertama; gagal jaringan langsung failover agar tidak menghabiskan sisa waktu Tier 2/3.
    - **Kalkulasi Timeout Dinamis**: Memberikan sisa waktu proporsional (hingga 90% dari sisa waktu total maksimum) kepada model untuk menyelesaikan instruksi kompleks.
 2. **Tier 2 — Provider Sekunder (OpenRouter Multi-Model Failover)**:
    - Membaca `OPENROUTER_API_KEY`.

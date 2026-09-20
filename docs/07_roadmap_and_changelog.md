@@ -4,6 +4,22 @@ Dokumen ini melacak visi masa depan pengembangan fungsionalitas Madrasah serta m
 
 ---
 
+## 7.0 Perbaikan Terbaru (Unreleased)
+
+* **Audit & Pembersihan Struktur Proyek (2026-09-20)**:
+  - **Hapus 16 artefak root**: seluruh `*.patch`, `patch_*.cjs/.sh`, `update-graph.*`, `generate-icons.js` (semua sudah teraplikasi ke source).
+  - **Hapus `dev-dist/`** (artefak build PWA dev) + tambahkan ke `.gitignore`.
+  - **Konsolidasi ikon PWA**: hapus duplikat `pwa-192x192.png`/`pwa-512x512.png`; manifest PWA di `vite.config.ts` kini memakai `icon-192x192.png`/`icon-512x512.png` (kualitas lebih tinggi, selaras dengan `manifest.json`).
+  - **Verifikasi**: `src/` bersih — 11 store, 11 modul, 16 komponen, utils/lib/hooks semua aktif, tanpa dead code. `npm run lint` + `npm run build` lolos.
+
+* **Perbaikan Kegagalan HCNSEC `generate-syllabus` (2026-09-20)**:
+  - **Penyaringan model rusak upstream**: `HCNSEC_MODEL` kini disaring case-insensitive (`DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `DeepSeek-V4.1-Flash`, `qwen3.8-max`, `kimi-k3`, `MiniMax-M3`) sehingga env basi tidak lagi memicu loop 404/timeout.
+  - **Beban berat tidak lagi fast-fail prematur**: abort/timeout pada `generate-syllabus`/`generate-flashcards` lanjut ke kandidat HCNSEC berikutnya (tetap mencapai `auto`, satu-satunya model lolos JSON ~2000 token) dengan budget 30s per-model; fast-fail ke Tier 2 hanya bila kandidat habis atau sisa waktu menipis.
+  - **Log diagnostik Tier 1**: setiap percobaan mencatat `endpoint` + daftar `candidates` aktual agar mudah membedakan env lokal vs env server/Vercel.
+  - **Dokumentasi**: `.env.example`, `05_data_model_and_api.md`, `06_operation_and_deployment.md`, `08_faq_and_troubleshooting.md` diperbarui (rekomendasi `HCNSEC_MODEL=auto`).
+
+---
+
 ## 7.1 Peta Jalan Pengembangan (Roadmap)
 
 Pengembangan **Madrasah — Personal Knowledge Operating System** dibagi ke dalam tiga fase strategis untuk bertransformasi dari sistem operasi pengetahuan personal lokal menjadi platform kolaboratif akademis yang kokoh.

@@ -23,9 +23,9 @@ Aplikasi membutuhkan file `.env` di direktori akar untuk beroperasi dengan fungs
 | :--- | :--- | :--- | :--- |
 | `HCNSEC_API_KEY` | **Penyedia Utama (Tier 1)** | *Kosong* | Kunci autentikasi API provider mandiri HCNSEC. |
 | `HCNSEC_BASE_URL` | **Penyedia Utama (Tier 1)** | `https://api.hcnsec.cn/v1` | URL basis endpoint API provider HCNSEC (OpenAI-compatible). |
-| `HCNSEC_MODEL` | Opsional | `Qwen3.8-27B` | Model prioritas HCNSEC (didukung otomatis: `Qwen3.8-27B`, `DeepSeek-V4-Pro`). |
+| `HCNSEC_MODEL` | Opsional | `auto` | Daftar model prioritas HCNSEC, pisahkan dengan koma (contoh: `auto, Qwen3.8-27B, glm-5.3-flash`). Model rusak upstream (`DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `DeepSeek-V4.1-Flash`, `qwen3.8-max`, `kimi-k3`, `MiniMax-M3`) otomatis disaring; fallback bawaan: `Qwen3.8-27B`, `glm-5.3-flash`, `Qwen3.8-Flash-Next`, `auto`. Untuk `generate-syllabus`/`generate-flashcards`, `auto` selalu dicoba pertama. |
 | `OPENROUTER_API_KEY` | **Penyedia Sekunder (Tier 2)** | *Kosong* | Kredensial API OpenRouter untuk kestabilan multi-model mandiri. |
-| `OPENROUTER_MODEL` | Opsional | `deepseek/deepseek-chat` | Model OpenRouter (didukung: `deepseek/deepseek-chat`, `qwen/qwen-2.5-72b-instruct`, dll). |
+| `OPENROUTER_MODEL` | Opsional | `deepseek/deepseek-chat` | Daftar model OpenRouter, pisahkan dengan koma. Model OpenRouter (didukung: `deepseek/deepseek-chat`, `qwen/qwen-2.5-72b-instruct`, dll). |
 | `GEMINI_API_KEY` | **Cadangan Terakhir (Tier 3)** | *Kosong* | Kredensial Google GenAI API resmi murni sebagai safety net jika Tier 1 & Tier 2 tidak dapat dihubungi. |
 | `APP_URL` | Opsional | `https://madrasah.remix` | Alamat URL aplikasi, dikirim sebagai header referer ke provider AI. |
 | `NODE_ENV` | Otomatis | `development` | Mengontrol mode jalannya aplikasi (`development` atau `production`). |
