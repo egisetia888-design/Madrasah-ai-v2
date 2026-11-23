@@ -1,17 +1,18 @@
-import { fetchWithAuth } from '../../lib/api';
+import { fetchWithAuth, prepareSuggestTagsPayload } from '../../lib/api';
 import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
-import { ArrowLeft, Save, Trash2, Send, ChevronDown, Sparkles, Check, X, Download, Copy, Printer, Share2, Globe, BookOpen } from "lucide-react";
+import { ArrowLeft, Save, Trash2, ChevronDown, Sparkles, Check, Download, Copy, Printer, Share2, Globe, BookOpen, Loader2 } from "lucide-react";
 import * as LucideIcons from "lucide-react";
 import { saveAs } from "file-saver";
 import { ContextualSidebar } from "../../components/writing/ContextualSidebar";
 import { useWritingStore } from "../../store/writingStore";
 import { useNotesStore } from "../../store/notesStore";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { MetadataRow } from "../../components/ui/MetadataRow";
 import { WritingStatus } from "../../types";
 import { useToastStore } from "../../store/toastStore";
-import { scanTextForEntities, autoLinkSingleEntity } from "../../utils/autoLinker";
+import { autoLinkSingleEntity } from "../../utils/autoLinker";
 import { PublishWebhookModal } from "../../components/publishing/PublishWebhookModal";
 import { ExportLiteraryModal } from "../../components/publishing/ExportLiteraryModal";
 
@@ -72,8 +73,8 @@ export function WritingDetailPage() {
 
   if (!draft) {
     return (
-      <div className="flex flex-col items-center justify-center h-full space-y-4">
-        <h2 className="text-xl font-medium text-gray-900">Draf tidak ditemukan</h2>
+      <div className="flex flex-col items-center justify-center h-full space-y-4 py-20 text-center">
+        <h2 className="text-xl font-semibold text-gray-900 font-display">Draf tidak ditemukan</h2>
         <Button variant="outline" onClick={() => navigate("/writing")}>
           <ArrowLeft className="w-4 h-4 mr-2" /> Kembali ke Penulisan
         </Button>
@@ -107,10 +108,7 @@ export function WritingDetailPage() {
       const res = await fetchWithAuth("/api/ai/suggest-tags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          content: title + "\n\n" + content,
-          notes: notes
-        }),
+        body: JSON.stringify(prepareSuggestTagsPayload(title + "\n\n" + content, notes)),
       });
       const data = await res.json();
       if (res.ok && (data.tags || data.icon)) {
@@ -219,36 +217,38 @@ ${content}
     }, 150);
   };
 
+  const wordCount = content.split(/\s+/).filter(w => w.length > 0).length;
+
   return (
     <div className="flex h-full animate-in fade-in duration-500">
-      <div className="flex-1 overflow-y-auto px-6 py-6 pb-20 print:p-0 print:overflow-visible">
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6 pb-24 print:p-0 print:overflow-visible">
         {/* Printable View - only visible during window.print() */}
         <div className="hidden print:block print-area font-serif text-black leading-relaxed whitespace-pre-wrap">
           <h1 className="text-3xl font-bold mb-2">{title || draft.title || 'Tanpa Judul'}</h1>
           <div className="text-xs text-gray-600 font-mono mb-6 pb-2 border-b border-gray-300">
-            Status: {status.toUpperCase()} • {content.split(/\s+/).filter(w => w.length > 0).length} kata • Terakhir disunting: {new Date(draft.updatedAt).toLocaleDateString()}
+            Status: {WRITING_PIPELINE.find(s => s.id === status)?.label || status} · {wordCount} kata · Terakhir disunting: {new Date(draft.updatedAt).toLocaleDateString('id-ID')}
           </div>
           <div className="text-base leading-relaxed whitespace-pre-wrap">{content}</div>
         </div>
 
         {/* Interactive Editor View - hidden during window.print() */}
-        <div className="max-w-4xl mx-auto space-y-6 print:hidden">
-          <div className="flex items-center justify-between no-print">
+        <div className="max-w-3xl mx-auto space-y-6 print:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 no-print pb-4 border-b border-gray-100">
             <Button variant="ghost" className="gap-2 -ml-3 text-gray-500 hover:text-gray-900" onClick={() => navigate("/writing")}>
               <ArrowLeft className="w-4 h-4" />
-              Kembali
+              <span>Kembali</span>
             </Button>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
               <Button 
                 variant="outline" 
                 className="gap-2 text-gray-900 bg-gray-50 border-gray-200 hover:bg-gray-100 hover:border-gray-300" 
                 onClick={handleAnalyzeContent}
                 disabled={isAnalyzing}
               >
-                <Sparkles className={`w-4 h-4 ${isAnalyzing ? 'animate-pulse' : ''}`} />
+                {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                 <span className="hidden sm:inline">{isAnalyzing ? "Menganalisis..." : "Analisis Draf"}</span>
               </Button>
-              <Button variant="ghost" className="gap-2 text-gray-900 hover:text-gray-800 hover:bg-gray-50" onClick={() => setIsDeleteDialogOpen(true)}>
+              <Button variant="ghost" className="gap-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100" onClick={() => setIsDeleteDialogOpen(true)} title="Hapus Draf">
                 <Trash2 className="w-4 h-4" />
                 <span className="hidden sm:inline">Hapus</span>
               </Button>
@@ -259,13 +259,13 @@ ${content}
                      setStatus(e.target.value as WritingStatus);
                      updateDraft(draft.id, { status: e.target.value as WritingStatus });
                   }}
-                  className="appearance-none bg-white border border-gray-200 text-gray-700 py-2 pl-3 pr-8 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent cursor-pointer"
+                  className="appearance-none bg-white border border-gray-200 text-gray-700 h-11 md:h-9 pl-3 pr-8 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 cursor-pointer"
                 >
                   {WRITING_PIPELINE.map(stage => (
                     <option key={stage.id} value={stage.id}>{stage.label}</option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 absolute right-2.5 top-2.5 text-gray-400 pointer-events-none" />
+                <ChevronDown className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               </div>
 
               {/* Export Dropdown */}
@@ -281,20 +281,20 @@ ${content}
                 </Button>
 
                 {isExportMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-52 bg-white rounded-2xl shadow-lg border border-gray-200 py-1.5 z-50 animate-in fade-in duration-150">
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-lg border border-gray-200 py-1.5 z-50 animate-in fade-in duration-150">
                     <div className="px-3 py-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wider font-mono border-b border-gray-100">
                       Format Ekspor
                     </div>
                     <button
                       onClick={handleCopyMarkdown}
-                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-2.5 sm:py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer min-h-[44px] sm:min-h-0"
                     >
                       <Copy className="w-4 h-4 text-gray-500" />
                       <span>Salin Markdown (+ YAML)</span>
                     </button>
                     <button
                       onClick={handleDownloadMarkdown}
-                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-2.5 sm:py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer min-h-[44px] sm:min-h-0"
                     >
                       <Download className="w-4 h-4 text-gray-500" />
                       <span>Unduh Berkas (.md)</span>
@@ -304,14 +304,14 @@ ${content}
                         setIsExportMenuOpen(false);
                         setIsLiteraryExportOpen(true);
                       }}
-                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-2.5 sm:py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer min-h-[44px] sm:min-h-0"
                     >
                       <BookOpen className="w-4 h-4 text-gray-500" />
                       <span>Ekspor Literer (PDF &amp; HTML)</span>
                     </button>
                     <button
                       onClick={handlePrintDocument}
-                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-2.5 sm:py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer min-h-[44px] sm:min-h-0"
                     >
                       <Printer className="w-4 h-4 text-gray-500" />
                       <span>Cetak Cepat Halaman</span>
@@ -324,7 +324,7 @@ ${content}
                         setIsExportMenuOpen(false);
                         setIsPublishWebhookOpen(true);
                       }}
-                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                      className="w-full text-left px-3 py-2.5 sm:py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 transition-colors cursor-pointer min-h-[44px] sm:min-h-0"
                     >
                       <Globe className="w-4 h-4 text-gray-500" />
                       <span>Terbitkan via Webhook</span>
@@ -335,7 +335,7 @@ ${content}
 
               <Button onClick={handleSave} className="gap-2 bg-gray-900 text-white hover:bg-gray-800 rounded-xl">
                 <Save className="w-4 h-4" />
-                <span className="hidden sm:inline">{isSaving ? "Tersimpan!" : "Simpan Draf"}</span>
+                <span>{isSaving ? "Tersimpan" : "Simpan Draf"}</span>
               </Button>
             </div>
           </div>
@@ -343,35 +343,37 @@ ${content}
           <div className="space-y-6">
             {aiSuggestions && (
               <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 mb-2 animate-in slide-in-from-top duration-300">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-gray-900" />
                     <h3 className="text-sm font-semibold text-gray-900 font-display">Saran AI (Draf)</h3>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={discardSuggestions} className="h-8 text-gray-600 hover:text-gray-900 hover:bg-gray-100">Tolak</Button>
-                    <Button size="sm" onClick={approveSuggestions} className="h-8 bg-gray-900 hover:bg-gray-800 text-white gap-1">
-                      <Check className="w-3 h-3" /> Terima Saran
+                    <Button size="sm" variant="ghost" onClick={discardSuggestions} className="text-gray-600 hover:text-gray-900 hover:bg-gray-100">Tolak</Button>
+                    <Button size="sm" onClick={approveSuggestions} className="bg-gray-900 hover:bg-gray-800 text-white gap-1">
+                      <Check className="w-3.5 h-3.5" /> Terima Saran
                     </Button>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-4 items-center mb-3">
-                  <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-gray-200">
-                    <span className="text-xs text-gray-500 font-medium uppercase tracking-wider font-mono">Ikon:</span>
+                  <div className="flex items-center gap-2 text-xs text-gray-700 font-mono">
+                    <span className="text-gray-400">Ikon:</span>
                     {(() => {
                       const Icon = (LucideIcons as any)[aiSuggestions.icon] || LucideIcons.FileText;
                       return <Icon className="w-4 h-4 text-gray-900" />;
                     })()}
-                    <span className="text-xs font-medium text-gray-900">{aiSuggestions.icon}</span>
+                    <span className="font-medium text-gray-900">{aiSuggestions.icon}</span>
                   </div>
-                  <div className="flex flex-wrap gap-1 items-center">
-                    <span className="text-xs text-gray-500 font-medium uppercase tracking-wider mr-1 font-mono">Tag:</span>
-                    {aiSuggestions.tags.map((t, i) => (
-                      <span key={i} className="px-2 py-0.5 text-[10px] font-bold bg-white text-gray-800 rounded-lg border border-gray-200 tracking-wide uppercase">
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
+                  {aiSuggestions.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-2 items-center text-xs font-mono text-gray-700">
+                      <span className="text-gray-400">Tag:</span>
+                      {aiSuggestions.tags.map((t, i) => (
+                        <span key={i} className="font-medium text-gray-900">
+                          #{t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <p className="text-[11px] text-gray-500 font-mono pt-2 border-t border-gray-200">
                   Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
@@ -379,12 +381,12 @@ ${content}
               </div>
             )}
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 sm:gap-4">
               {draft.icon && (
-                <div className="p-3 bg-gray-50 rounded-2xl border border-gray-100">
+                <div className="p-2.5 sm:p-3 bg-gray-50 rounded-2xl border border-gray-100 shrink-0">
                   {(() => {
                      const Icon = (LucideIcons as any)[draft.icon] || LucideIcons.FileText;
-                     return <Icon className="w-8 h-8 text-gray-900" />;
+                     return <Icon className="w-6 h-6 sm:w-8 sm:h-8 text-gray-900" />;
                   })()}
                 </div>
               )}
@@ -392,20 +394,24 @@ ${content}
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="text-4xl font-bold tracking-tight text-gray-900 bg-transparent border-none outline-none w-full placeholder:text-gray-300 focus:ring-0 p-0 font-serif"
+                className="text-2xl sm:text-4xl font-bold tracking-tight text-gray-900 bg-transparent border-none outline-none w-full placeholder:text-gray-300 focus:ring-0 p-0 font-display"
                 placeholder="Judul Dokumen"
               />
             </div>
             
-            <div className="flex items-center gap-4 text-sm text-gray-500 border-y border-gray-100 py-3">
-              <span>{content.split(/\s+/).filter(w => w.length > 0).length} kata</span>
-              <span>Terakhir disunting: {new Date(draft.updatedAt).toLocaleTimeString()}</span>
-            </div>
+            <MetadataRow
+              className="border-y border-gray-100 py-3"
+              items={[
+                `${wordCount} kata`,
+                `Disunting ${new Date(draft.updatedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`,
+                new Date(draft.updatedAt).toLocaleDateString('id-ID'),
+              ]}
+            />
 
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              className="w-full min-h-[600px] text-lg leading-relaxed text-gray-800 bg-transparent border-none outline-none resize-none placeholder:text-gray-300 focus:ring-0 p-0 font-serif"
+              className="w-full min-h-[540px] text-base sm:text-lg leading-relaxed text-gray-800 bg-transparent border-none outline-none resize-none placeholder:text-gray-300 focus:ring-0 p-0 font-serif"
               placeholder="Mulai menulis draf Anda..."
             />
           </div>
@@ -423,18 +429,14 @@ ${content}
         />
       </div>
 
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogHeader>
-          <DialogTitle>Hapus Draf</DialogTitle>
-        </DialogHeader>
-        <DialogContent>
-          <p className="text-gray-600">Apakah Anda yakin ingin menghapus "{draft.title}"? Tindakan ini tidak dapat dibatalkan.</p>
-        </DialogContent>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setIsDeleteDialogOpen(false)}>Batal</Button>
-          <Button variant="destructive" onClick={handleDelete} className="bg-gray-900 hover:bg-gray-800 text-white">Hapus Draf</Button>
-        </DialogFooter>
-      </Dialog>
+      <ConfirmDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        title="Hapus Draf"
+        description={`Apakah Anda yakin ingin menghapus "${draft.title}"? Tindakan ini tidak dapat dibatalkan.`}
+        confirmLabel="Hapus Draf"
+        onConfirm={handleDelete}
+      />
 
       <PublishWebhookModal
         isOpen={isPublishWebhookOpen}

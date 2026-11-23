@@ -6,6 +6,17 @@ Dokumen ini melacak visi masa depan pengembangan fungsionalitas Madrasah serta m
 
 ## 7.0 Perbaikan Terbaru (Unreleased)
 
+* **Penghapusan Total Firebase & Optimalisasi Penyimpanan Lokal (IndexedDB)**:
+  - **Zero-Config Local Onboarding**: Menghapus total `firebase` SDK, aturan Firestore, dan kebutuhan kredensial `VITE_FIREBASE_*`; mengganti halaman login dengan layar selamat datang ruang kerja lokal sederhana (`LoginPage.tsx`) lengkap dengan opsi pemulihan cadangan JSON cepat.
+  - **Registri Multi-Store & Backup JSON Terpadu**: Memperbarui `src/store/indexedDbStorage.ts` agar mendaftarkan seluruh 8 *object store* `madrasah_db` beserta preferensi lokal, memperbaiki fitur ekspor/impor/reset agar menyentuh seluruh data IndexedDB secara utuh (`madrasah-local-v2` + fallback `v1`), serta menambahkan diagnostik kuota & permintaan *Persistent Storage* di `SettingsPage.tsx`.
+  - **Status Penyimpanan Lokal**: Mengganti lencana dan kartu sinkronisasi cloud pada `GlobalSyncBadge.tsx`, `SyncStatusIndicator.tsx`, `Sidebar.tsx`, `MobileNav.tsx`, dan `SettingsPage.tsx` menjadi indikator penyimpanan lokal IndexedDB yang bersih.
+
+* **Migrasi Penuh Layanan AI ke Google Gemini (Hybrid Hemat Token)**:
+  - **Penghapusan Provider Lama**: Menghapus integrasi HCNSEC dan OpenRouter sepenuhnya; seluruh 7 fitur AI kini berjalan langsung melalui `@google/genai` SDK (`^3.6.1`) dengan header `User-Agent: aistudio-build`.
+  - **Routing Model Hybrid**: Tugas ringan berfrekuensi tinggi (`/api/ai/suggest-tags`, `/api/ai/grade-flashcard`, `/api/ai/book-info`, `/api/ai/summarize-literature`) menggunakan `gemini-3.1-flash-lite` (`ThinkingLevel.MINIMAL`), sedangkan tugas sintesis dan struktur kompleks (`/api/ai/zettelkasten`, `/api/ai/generate-flashcards`, `/api/ai/generate-syllabus`) menggunakan `gemini-4-hydrogen` (`ThinkingLevel.LOW`).
+  - **Kompresi Konteks & Bounded LRU Cache**: Menambahkan seleksi konteks berbasis relevansi kata kunci pada Zettelkasten, pemangkasan *head+tail*, proyeksi payload minimal di klien (`src/lib/api.ts`), dan cache LRU terstandarisasi SHA-256 (maks 500 entri, TTL 2 jam).
+  - **Penyelarasan Copy & Dokumentasi**: Memperbarui `.env.example`, `index.html`, `metadata.json`, `README.md`, dan dokumentasi `/docs/`.
+
 * **Audit & Pembersihan Struktur Proyek (2026-09-20)**:
   - **Hapus 16 artefak root**: seluruh `*.patch`, `patch_*.cjs/.sh`, `update-graph.*`, `generate-icons.js` (semua sudah teraplikasi ke source).
   - **Hapus `dev-dist/`** (artefak build PWA dev) + tambahkan ke `.gitignore`.
@@ -46,10 +57,10 @@ Bukan pivot produk — perbaikan integritas di atas fondasi yang sudah shipped d
 - [x] **Resurfacing mingguan**: Catatan `processed` yang tidak disentuh selama >14 hari dimunculkan sebagai kartu "Resurfacing Mingguan" pada `DashboardPage.tsx` (baris ~272-289) dengan rotasi bergilir mingguan. (Selesai dan terverifikasi di kode).
 - [x] **Aksi konfirmasi (di atas)**: Memakai ulang komponen `ProvenanceBadge` sebagai satu-satunya titik gesekan sadar satu-sentuhan tanpa modal berlebih. (Selesai dan terverifikasi di kode).
 
-### Fase 2: Sinkronisasi Awan & Autentikasi Multi-User (Fase Aktif)
-- [x] **Multi-User Authentication**: Integrasi antarmuka dan penanganan Firebase Auth (Google Sign-In) dengan fallback anggun saat offline (`src/store/authStore.ts` & `src/modules/settings/SettingsPage.tsx`). (Selesai dan terverifikasi di kode).
-- [x] **Durable Cloud Persistence & OCC Sync**: Implementasi protokol Optimistic Concurrency Control (`syncWithOCC`), pemutakhiran menyeluruh data lokal ke Firestore via `syncAllLocalToCloud`, serta kendali manual di halaman Pengaturan. (Selesai dan terverifikasi di kode).
-- [ ] **Sinkronisasi Multidevice Real-Time Lanjutan**: Pembaruan data instan latar belakang antar-sesi aktif secara konstan.
+### Fase 2: Ketahanan Penyimpanan Lokal & Portabilitas Data (Selesai / Dioptimalkan)
+- [x] **Zero-Config Local Entry (`authStore.ts` & `LoginPage.tsx`)**: Akses ruang kerja lokal langsung siap pakai tanpa konfigurasi API key Firebase atau login pihak ketiga.
+- [x] **IndexedDB Multi-Store Registry & Unified Backup (`indexedDbStorage.ts` & `SettingsPage.tsx`)**: Ekspor/impor JSON terpadu lintas seluruh 8 *object store* pengetahuan, diagnostik kapasitas peramban, dan proteksi *Persistent Storage*.
+- [ ] **Sinkronisasi Peer-to-Peer / Eksternal Opsional**: Cadangan lintas-perangkat mandiri di luar platform cloud terpusat (rencana masa depan opsional).
 
 ### Fase 3: Kolaborasi, Ekspor Literer, dan Ekosistem Penerbitan (Fase Aktif / Selesai)
 - [x] **Ekspor Format Kaya & Literer**: Ekspor draf tulisan dari Studio Menulis langsung ke format Markdown (+ Frontmatter YAML), cetak bersih PDF terisolasi bertipografi buku (`ExportLiteraryModal.tsx`), serta unduh berkas E-Book mandiri portabel (`.html`) untuk pembacaan luring di e-reader atau peramban. (Selesai dan terverifikasi di kode).

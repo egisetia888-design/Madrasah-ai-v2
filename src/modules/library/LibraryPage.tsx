@@ -1,12 +1,13 @@
-import { SyncStatusIndicator } from '../../components/ui/SyncStatusIndicator';
 import { useState, useMemo } from "react"
-import { fetchWithAuth } from "../../lib/api"
 import { useNavigate } from "react-router-dom"
 import { Button } from "../../components/ui/Button"
-import { Plus, Search, Book, MoreVertical, BookOpen, CheckCircle2, Bookmark, Flame, PenTool, ExternalLink, Filter, Sparkles, X } from "lucide-react"
+import { PageHeader } from "../../components/ui/PageHeader"
+import { EmptyState } from "../../components/ui/EmptyState"
+import { MetadataRow } from "../../components/ui/MetadataRow"
+import { Plus, Search, Book, BookOpen, CheckCircle2, Bookmark, Flame, PenTool, X } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog"
+import { BookMetadataFields } from "../../components/library/BookMetadataFields"
 import { useLibraryStore } from "../../store/libraryStore"
-import { useToastStore } from "../../store/toastStore"
 import { BookStatus } from "../../types"
 import { cn } from "../../utils/cn"
 
@@ -15,11 +16,11 @@ export function LibraryPage() {
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [title, setTitle] = useState("")
   const [authorName, setAuthorName] = useState("")
+  const [isbn, setIsbn] = useState("")
   const [totalPages, setTotalPages] = useState("")
   const [coverUrl, setCoverUrl] = useState("")
   const [isEstimatedPages, setIsEstimatedPages] = useState(false)
   const [status, setStatus] = useState<BookStatus>('owned')
-  const [isFetchingInfo, setIsFetchingInfo] = useState(false)
 
   const [searchQuery, setSearchQuery] = useState("")
   const [activeTab, setActiveTab] = useState<BookStatus | 'all'>('all')
@@ -28,94 +29,15 @@ export function LibraryPage() {
   const authors = useLibraryStore((state) => state.authors)
   const addBook = useLibraryStore((state) => state.addBook)
   const addAuthor = useLibraryStore((state) => state.addAuthor)
-  const addToast = useToastStore(state => state.addToast)
-  const updateToast = useToastStore(state => state.updateToast)
 
-  const handleAutofill = async () => {
-    if (!title.trim()) {
-      addToast({ type: 'info', message: 'Masukkan judul buku terlebih dahulu.' });
-      return;
-    }
-
-    setIsFetchingInfo(true);
-    const toastId = addToast({ type: 'loading', message: 'Memulai pencarian metadata buku...' });
-
-    try {
-      const res = await fetchWithAuth("/api/ai/book-info", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/x-ndjson" },
-        body: JSON.stringify({ title: title.trim(), author: authorName.trim() }),
-      });
-
-      if (!res.ok) {
-        let errMsg = 'Gagal mencari info buku.';
-        try {
-          const text = await res.text();
-          const parsedErr = JSON.parse(text).error;
-          errMsg = typeof parsedErr === 'string' ? parsedErr : (parsedErr?.message || errMsg);
-        } catch(e){}
-        updateToast(toastId, { type: 'error', message: errMsg });
-        return;
-      }
-
-      if (!res.body) throw new Error("No response body");
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let finalData = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const parsed = JSON.parse(line);
-            if (parsed.type === "log") {
-              updateToast(toastId, { type: 'loading', message: parsed.message });
-            } else if (parsed.type === "result") {
-              finalData = parsed.data;
-            } else if (parsed.type === "error") {
-              const errText = typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message || 'Gagal mencari info buku.');
-              updateToast(toastId, { type: 'error', message: errText });
-              return;
-            }
-          } catch (e) {
-            console.error("Failed to parse stream line", line);
-          }
-        }
-      }
-
-      if (finalData) {
-        const data = finalData;
-        if (data.author && !authorName.trim()) {
-          setAuthorName(data.author);
-        }
-        if (data.totalPages) {
-          setTotalPages(String(data.totalPages));
-          setIsEstimatedPages(Boolean(data.isEstimated));
-        }
-        if (data.coverUrl) setCoverUrl(data.coverUrl);
-
-        if (!data.totalPages && !data.coverUrl && !data.author) {
-          updateToast(toastId, { type: 'info', message: 'Metadata buku belum ditemukan di katalog publik. Silakan isi secara manual.' });
-        } else if (data.isEstimated) {
-          updateToast(toastId, { type: 'info', message: 'Data presisi tidak ditemukan. Sebagian informasi diperkirakan AI.' });
-        } else {
-          updateToast(toastId, { type: 'success', message: 'Informasi buku berhasil ditemukan dari katalog publik.' });
-        }
-      }
-    } catch (error) {
-      console.error(error);
-      updateToast(toastId, { type: 'error', message: 'Koneksi gagal saat mencari info buku.' });
-    } finally {
-      setIsFetchingInfo(false);
-    }
+  const resetAddForm = () => {
+    setTitle("")
+    setAuthorName("")
+    setIsbn("")
+    setTotalPages("")
+    setCoverUrl("")
+    setIsEstimatedPages(false)
+    setStatus('owned')
   }
 
   const handleAddBook = (e: any) => {
@@ -132,23 +54,21 @@ export function LibraryPage() {
       }
     }
 
+    const parsedPages = totalPages ? parseInt(totalPages, 10) : NaN;
+
     addBook({
       title: title.trim(),
       authorId,
       categoryId: null,
+      isbn: isbn.trim() || undefined,
       status,
       progress: 0,
-      totalPages: totalPages ? parseInt(totalPages, 10) : undefined,
+      totalPages: !isNaN(parsedPages) && parsedPages > 0 ? parsedPages : undefined,
       coverImage: coverUrl.trim() || undefined,
-      isEstimatedPages: totalPages && isEstimatedPages ? true : undefined
+      isEstimatedPages: !isNaN(parsedPages) && parsedPages > 0 && isEstimatedPages ? true : undefined
     })
 
-    setTitle("")
-    setAuthorName("")
-    setTotalPages("")
-    setCoverUrl("")
-    setIsEstimatedPages(false)
-    setStatus('owned')
+    resetAddForm()
     setIsAddOpen(false)
   }
 
@@ -172,52 +92,40 @@ export function LibraryPage() {
   const tabs: { id: BookStatus | 'all', label: string, icon: any }[] = [
     { id: 'all', label: 'Semua', icon: Book },
     { id: 'reading', label: 'Sedang Dibaca', icon: BookOpen },
-    { id: 'owned', label: 'Milik Saya', icon: Bookmark },
-    { id: 'wishlist', label: 'Wishlist', icon: Flame },
+    { id: 'owned', label: 'Dimiliki', icon: Bookmark },
+    { id: 'wishlist', label: 'Daftar Ingin', icon: Flame },
     { id: 'finished', label: 'Selesai', icon: CheckCircle2 },
     { id: 'summarized', label: 'Dirangkum', icon: PenTool },
   ];
-
-  const getStatusColor = (status: BookStatus) => {
-    switch (status) {
-      case 'reading': return 'text-gray-900 bg-gray-100 border-gray-300';
-      case 'finished': return 'text-gray-900 bg-gray-100 border-gray-300';
-      case 'wishlist': return 'text-gray-600 bg-gray-50 border-gray-200';
-      case 'summarized': return 'text-gray-900 bg-gray-100 border-gray-300';
-      default: return 'text-gray-600 bg-gray-50 border-gray-200';
-    }
-  }
 
   const getStatusLabel = (status: BookStatus) => {
     switch (status) {
       case 'reading': return 'Sedang Dibaca';
       case 'finished': return 'Selesai';
-      case 'wishlist': return 'Wishlist';
+      case 'wishlist': return 'Daftar Ingin';
       case 'summarized': return 'Dirangkum';
       case 'connected': return 'Terhubung';
       case 'applied': return 'Diterapkan';
       case 'published': return 'Dipublikasikan';
-      default: return 'Milik Saya';
+      default: return 'Dimiliki';
     }
   }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 w-full min-w-0 pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 font-display">Pustaka</h1>
-          <p className="text-gray-500 mt-1 text-xs sm:text-sm max-w-xl leading-relaxed">
-            Kelola koleksi buku, artikel, dan referensi Anda. Bangun basis pengetahuan dengan merangkum dan menghubungkan gagasan.
-          </p>
-        </div>
-        <Button className="w-full sm:w-auto gap-2 shrink-0 h-11 sm:h-9" onClick={() => setIsAddOpen(true)}>
-          <Plus className="w-4 h-4" />
-          <span>Tambah Materi</span>
-        </Button>
-      </div>
+      <PageHeader
+        title="Pustaka"
+        description="Kelola koleksi buku, artikel, dan referensi Anda untuk membangun basis pengetahuan terhubung."
+        actions={
+          <Button className="w-full sm:w-auto gap-2" onClick={() => setIsAddOpen(true)}>
+            <Plus className="w-4 h-4" />
+            <span>Tambah Materi</span>
+          </Button>
+        }
+      />
 
       <div className="space-y-3 border-b border-gray-200 pb-4">
-        <div className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-xl px-3 h-11 w-full focus-within:ring-2 focus-within:ring-gray-900 focus-within:border-transparent transition-all">
+        <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl pl-3 pr-1 h-11 w-full focus-within:ring-2 focus-within:ring-gray-900 focus-within:border-transparent transition-all">
            <Search className="w-4 h-4 text-gray-400 shrink-0" />
            <input
                type="text"
@@ -227,8 +135,13 @@ export function LibraryPage() {
                className="bg-transparent border-none outline-none text-sm w-full text-gray-900 placeholder:text-gray-400"
            />
            {searchQuery && (
-             <button onClick={() => setSearchQuery("")} className="text-gray-400 hover:text-gray-600 p-1">
-               <X className="w-3.5 h-3.5" />
+             <button
+               type="button"
+               onClick={() => setSearchQuery("")}
+               aria-label="Hapus pencarian"
+               className="text-gray-400 hover:text-gray-700 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-2 flex items-center justify-center cursor-pointer"
+             >
+               <X className="w-4 h-4" />
              </button>
            )}
         </div>
@@ -237,10 +150,11 @@ export function LibraryPage() {
         <div className="flex items-center gap-1.5 overflow-x-auto w-full no-scrollbar py-1 scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0">
           {tabs.map(tab => (
             <button
+              type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
+                "flex items-center gap-2 px-3.5 min-h-[44px] sm:min-h-0 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
                 activeTab === tab.id
                   ? "bg-gray-900 text-white shadow-sm font-semibold"
                   : "bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 active:bg-gray-100"
@@ -255,25 +169,26 @@ export function LibraryPage() {
 
       <div className="grid grid-cols-1 gap-6">
         {books.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50/50 p-6">
-             <div className="w-14 h-14 bg-white shadow-sm rounded-2xl flex items-center justify-center mb-4 text-gray-400 border border-gray-100">
-               <Book className="w-7 h-7" />
-             </div>
-             <h3 className="text-base font-semibold text-gray-900 font-display">Pustaka Anda masih kosong</h3>
-             <p className="text-xs sm:text-sm text-gray-500 mt-1 mb-5 max-w-sm leading-relaxed">
-               Tambahkan buku atau materi untuk mulai membangun Sistem Operasi Pengetahuan Pribadi Anda.
-             </p>
-             <Button onClick={() => setIsAddOpen(true)} className="gap-2 w-full sm:w-auto">
-               <Plus className="w-4 h-4" />
-               Tambah Buku Pertama
-             </Button>
-          </div>
+          <EmptyState
+            icon={Book}
+            title="Pustaka Anda masih kosong"
+            description="Tambahkan buku atau materi bacaan untuk mulai merangkum dan menautkan gagasan."
+            action={
+              <Button onClick={() => setIsAddOpen(true)} className="gap-2 w-full sm:w-auto">
+                <Plus className="w-4 h-4" />
+                Tambah Buku Pertama
+              </Button>
+            }
+          />
         ) : filteredBooks.length === 0 ? (
-           <div className="text-center py-16 text-gray-500 text-sm">
-             Tidak ada materi yang sesuai dengan pencarian atau filter saat ini.
-           </div>
+          <EmptyState
+            compact
+            icon={Search}
+            title="Materi tidak ditemukan"
+            description="Tidak ada materi yang sesuai dengan kata kunci atau filter status saat ini."
+          />
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
             {filteredBooks.map(book => {
               const progressPct = book.totalPages && book.totalPages > 0
                 ? Math.min(100, Math.round((book.progress / book.totalPages) * 100))
@@ -281,11 +196,12 @@ export function LibraryPage() {
 
               return (
                 <div key={book.id} onClick={() => navigate(`/library/${book.id}`)} className="group flex flex-col gap-2.5 cursor-pointer">
-                  <div className="aspect-[2/3] w-full bg-gray-100 rounded-xl border border-gray-200 flex flex-col items-center justify-center text-center transition-all group-hover:border-gray-300 group-hover:shadow-md relative overflow-hidden">
+                  <div className="aspect-[2/3] w-full bg-gray-100 rounded-2xl border border-gray-200 flex flex-col items-center justify-center text-center transition-all group-hover:border-gray-300 group-hover:shadow-sm relative overflow-hidden">
                     {book.coverImage && (
                       <img
                         src={book.coverImage}
                         alt={book.title}
+                        referrerPolicy="no-referrer"
                         className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 z-10"
                         onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       />
@@ -294,32 +210,26 @@ export function LibraryPage() {
                       <Book className="w-8 h-8 text-gray-300 mb-2" />
                       <span className="text-xs font-semibold text-gray-600 line-clamp-2">{book.title}</span>
                     </div>
-                    <div className="absolute top-2 left-2 z-20">
-                      <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/95 backdrop-blur-sm text-gray-900 border border-gray-200 shadow-xs font-mono">
-                        {getStatusLabel(book.status)}
-                      </span>
-                    </div>
                   </div>
-                  <div>
+                  <div className="space-y-1">
                     <h3 className="font-semibold text-xs sm:text-sm text-gray-900 line-clamp-1 group-hover:text-gray-600 transition-colors font-display">
                       {book.title}
                     </h3>
-                    <p className="text-[11px] text-gray-500 line-clamp-1 mt-0.5">
+                    <p className="text-xs text-gray-500 line-clamp-1">
                       {getAuthorName(book.authorId)}
                     </p>
+                    <MetadataRow
+                      items={[
+                        getStatusLabel(book.status),
+                        book.totalPages && book.totalPages > 0 ? `${progressPct}%` : null,
+                        book.totalPages && book.totalPages > 0 && book.isEstimatedPages ? 'perkiraan' : null,
+                      ]}
+                    />
                     {book.totalPages && book.totalPages > 0 ? (
-                      <div className="mt-2 flex items-center gap-2">
-                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="pt-1">
+                        <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
                           <div className="h-full bg-gray-900 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
                         </div>
-                        <span className="text-[10px] text-gray-400 font-mono shrink-0 flex items-center gap-1">
-                          {progressPct}%
-                          {book.isEstimatedPages && (
-                            <span className="text-[8px] font-sans px-1 py-0.2 bg-gray-100 text-gray-500 rounded border border-gray-200">
-                              perkiraan
-                            </span>
-                          )}
-                        </span>
                       </div>
                     ) : null}
                   </div>
@@ -330,105 +240,60 @@ export function LibraryPage() {
         )}
       </div>
 
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+      <Dialog
+        open={isAddOpen}
+        onOpenChange={(open) => {
+          setIsAddOpen(open);
+          if (!open) resetAddForm();
+        }}
+        maxWidthClass="max-w-xl"
+      >
         <DialogHeader>
           <DialogTitle>Tambah Materi Baru</DialogTitle>
         </DialogHeader>
         <form className="flex flex-col flex-1 min-h-0 overflow-hidden" onSubmit={handleAddBook}>
           <DialogContent className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Judul Buku <span className="text-gray-500">*</span></label>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                type="text"
-                className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent"
-                placeholder="Contoh: Atomic Habits"
-                required
-              />
-            </div>
+            <BookMetadataFields
+              title={title}
+              onTitleChange={setTitle}
+              authorName={authorName}
+              onAuthorNameChange={setAuthorName}
+              isbn={isbn}
+              onIsbnChange={setIsbn}
+              totalPages={totalPages}
+              onTotalPagesChange={setTotalPages}
+              coverUrl={coverUrl}
+              onCoverUrlChange={setCoverUrl}
+              isEstimatedPages={isEstimatedPages}
+              onIsEstimatedPagesChange={setIsEstimatedPages}
+              resetTrigger={isAddOpen}
+            />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">Penulis</label>
-                <input
-                  value={authorName}
-                  onChange={(e) => setAuthorName(e.target.value)}
-                  type="text"
-                  className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent"
-                  placeholder="Contoh: James Clear"
-                />
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <label className="text-sm font-medium text-gray-700">Total Halaman</label>
-                    {isEstimatedPages && totalPages && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200">
-                        perkiraan AI
-                      </span>
-                    )}
-                  </div>
-                  {title.trim() && (
-                    <button
-                      type="button"
-                      onClick={handleAutofill}
-                      disabled={isFetchingInfo}
-                      className="text-[10px] font-semibold flex items-center gap-1 text-gray-700 hover:text-gray-900 transition-colors disabled:opacity-50"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      {isFetchingInfo ? 'Mencari...' : 'Autofill Data'}
-                    </button>
-                  )}
-                </div>
-                {isEstimatedPages && (
-                  <p className="text-[11px] text-gray-500 font-mono">
-                    Hasil AI — periksa ke sumber sebelum dijadikan pegangan.
-                  </p>
-                )}
-                <input
-                  value={totalPages}
-                  onChange={(e) => {
-                    setTotalPages(e.target.value);
-                    if (!e.target.value) setIsEstimatedPages(false);
-                  }}
-                  type="number"
-                  min="1"
-                  className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent"
-                  placeholder="Contoh: 320"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">URL Sampul Buku (Opsional)</label>
-              <input
-                value={coverUrl}
-                onChange={(e) => setCoverUrl(e.target.value)}
-                type="url"
-                className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent"
-                placeholder="https://example.com/cover.jpg"
-              />
-            </div>
-
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="text-sm font-medium text-gray-700">Status</label>
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as BookStatus)}
-                className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent"
+                className="flex h-11 w-full rounded-xl border border-gray-200 bg-white px-3 py-1 text-sm text-gray-900 shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent"
               >
-                <option value="wishlist">Wishlist</option>
-                <option value="owned">Milik Saya</option>
+                <option value="wishlist">Daftar Ingin</option>
+                <option value="owned">Dimiliki</option>
                 <option value="reading">Sedang Dibaca</option>
                 <option value="finished">Selesai</option>
                 <option value="summarized">Dirangkum</option>
               </select>
             </div>
-
           </DialogContent>
           <DialogFooter className="pt-4 border-t border-gray-100">
-            <Button type="button" variant="ghost" onClick={() => setIsAddOpen(false)} className="w-full sm:w-auto mb-2 sm:mb-0">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                resetAddForm();
+                setIsAddOpen(false);
+              }}
+              className="w-full sm:w-auto mb-2 sm:mb-0"
+            >
               Batal
             </Button>
             <Button type="submit" className="w-full sm:w-auto" disabled={!title.trim()}>

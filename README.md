@@ -9,7 +9,7 @@ Motto: "Tuntutlah ilmu dari buaian hingga ke liang lahat." (Hadits Riwayat)
 
 **Madrasah — Personal Knowledge Operating System** adalah sistem operasi pengetahuan pribadi (Personal Knowledge Operating System) modern yang dirancang khusus untuk mengintegrasikan seluruh siklus hidup intelektual individu. Aplikasi ini menggabungkan penataan kurikulum belajar, manajemen literatur pustaka, pencatatan Markdown berbasis Zettelkasten, penulisan bebas gangguan, serta pelatihan retensi ingatan jangka panjang melalui kartu flash (*spaced repetition*) dalam satu antarmuka monokromatik yang hening dan tanpa distraksi.
 
-Aplikasi ini dioptimalkan sepenuhnya untuk perangkat desktop maupun mobile secara responsif, menghadirkan harmoni visual tinggi, tipografi presisi, mesin penautan entitas otomatis (*Automated Knowledge & Entity Linking*), dan fungsionalitas cerdas berbasis gateway AI HCNSEC.
+Aplikasi ini dioptimalkan sepenuhnya untuk perangkat desktop maupun mobile secara responsif, menghadirkan harmoni visual tinggi, tipografi presisi, mesin penautan entitas otomatis (*Automated Knowledge & Entity Linking*), dan fungsionalitas cerdas berbasis **Google Gemini API (`@google/genai`)**.
 
 ---
 
@@ -33,10 +33,10 @@ Untuk memudahkan penelusuran, arsitektur informasi, dan pemeliharaan jangka panj
 *Definisi skema antarmuka TypeScript untuk seluruh entitas sistem, dokumentasi rute API backend Express, mekanisme pembatasan frekuensi (rate limiting), cache memori (TTL 1 jam), dan penanganan penguraian JSON AI yang tangguh.*
 
 ### [⚙️ 06. Panduan Operasional, Instalasi, dan Deployment](docs/06_operation_and_deployment.md)
-*Panduan instalasi prasyarat lokal, konfigurasi berkas variabel lingkungan (.env), optimasi RAM server, serta alur build produksi full-stack menggunakan bundler esbuild untuk penyajian container di Google Cloud Run.*
+*Panduan instalasi prasyarat lokal, konfigurasi minimal variabel lingkungan (.env), penyimpanan lokal IndexedDB, serta alur build produksi full-stack menggunakan bundler esbuild.*
 
 ### [🗺️ 07. Peta Jalan Pengembangan (Roadmap) dan Changelog](docs/07_roadmap_and_changelog.md)
-*Melacak sejarah rilis perubahan sistem (changelog) serta memetakan rencana masa depan rilis fungsionalitas multi-user, database cloud terdistribusi, dan ekosistem publikasi.*
+*Melacak sejarah rilis perubahan sistem (changelog) serta memetakan perkembangan arsitektur penyimpanan lokal, lapisan Ta'dib, dan ekosistem publikasi.*
 
 ### [❓ 08. Pertanyaan Umum (FAQ) dan Panduan Pemecahan Masalah](docs/08_faq_and_troubleshooting.md)
 *Jawaban atas pertanyaan privasi data, justifikasi filosofis warna monokrom, serta solusi pemecahan masalah praktis untuk kegagalan respons AI, kehilangan data lokal, atau kelambatan performa visualisasi graf.*
@@ -54,22 +54,15 @@ npm install
 ```
 
 ### 2. Konfigurasi Variabel Lingkungan
-Salin `.env.example` menjadi `.env` dan masukkan kunci API serta konfigurasi penyedia AI Anda (disarankan **HCNSEC**):
+Salin `.env.example` menjadi `.env` dan masukkan kunci API **Google Gemini** Anda:
 ```bash
 cp .env.example .env
 ```
 Isi variabel utama di dalam `.env`:
 ```env
-# Penyedia AI Utama (HCNSEC / OpenAI-Compatible Provider)
-HCNSEC_API_KEY="your-hcnsec-api-key"
-HCNSEC_BASE_URL="https://api.hcnsec.com/v1"
-HCNSEC_MODEL="google/gemini-2.5-flash"
-
-# Alternatif Google GenAI SDK (Opsional)
-GEMINI_API_KEY=""
-
-# Alternatif OpenRouter (Opsional)
-OPENROUTER_API_KEY=""
+# Penyedia AI Tunggal (Google GenAI SDK — Hybrid Hemat Token)
+GEMINI_API_KEY="your-google-gemini-api-key"
+GEMINI_MODEL="" # Opsional: kosongkan untuk routing hybrid otomatis (gemini-3.1-flash-lite & gemini-4-hydrogen)
 ```
 
 ### 3. Jalankan Server Lokal

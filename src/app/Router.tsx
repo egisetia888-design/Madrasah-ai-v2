@@ -23,27 +23,9 @@ import { ConceptsPage } from "../modules/concepts/ConceptsPage"
 import { useAuthStore } from "../store/authStore"
 
 function ProtectedRoute() {
-  const isCloudAuthenticated = useAuthStore((state) => state.isCloudAuthenticated)
-  const isLocalMode = useAuthStore((state) => state.isLocalMode)
   const hasCompletedOnboarding = useAuthStore((state) => state.hasCompletedOnboarding)
-  const isAuthLoading = useAuthStore((state) => state.isAuthLoading)
 
-  if (isAuthLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50/50">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 bg-gray-900 rounded-xl mx-auto flex items-center justify-center shadow-sm animate-pulse">
-            <span className="text-white font-bold font-display text-xl">M</span>
-          </div>
-          <p className="text-sm font-medium text-gray-500 animate-pulse">Memuat Madrasah...</p>
-        </div>
-      </div>
-    )
-  }
-
-  const isAllowed = isCloudAuthenticated || isLocalMode || hasCompletedOnboarding
-
-  if (!isAllowed) {
+  if (!hasCompletedOnboarding) {
     return <Navigate to="/login" replace />
   }
 

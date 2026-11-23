@@ -13,8 +13,8 @@ const workspaceItems = [
   { name: "Pustaka", href: "/library", icon: Library },
   { name: "Catatan", href: "/notes", icon: FileText },
   { name: "Konsep", href: "/concepts", icon: BrainCircuit },
-  { name: "Graf Analisa", href: "/graph", icon: Network },
-  { name: "Review", href: "/review", icon: Brain },
+  { name: "Graf Pengetahuan", href: "/graph", icon: Network },
+  { name: "Ulasan", href: "/review", icon: Brain },
   { name: "Tulisan", href: "/writing", icon: PenTool },
   { name: "Proyek", href: "/projects", icon: Briefcase },
   { name: "Kurikulum", href: "/curriculum", icon: Map },
@@ -46,21 +46,21 @@ export function Sidebar() {
       </div>
 
       <div className="flex items-center gap-2 mb-6">
-        <button onClick={() => setSearchOpen(true)} className="flex-1 flex items-center gap-2 px-3 py-2 text-sm text-gray-500 bg-white border border-gray-200 rounded-lg shadow-sm hover:border-gray-300 hover:text-gray-900 transition-all text-left">
+        <button onClick={() => setSearchOpen(true)} className="flex-1 flex items-center gap-2 px-3 py-2 text-sm text-gray-500 bg-white border border-gray-200 rounded-xl shadow-sm hover:border-gray-300 hover:text-gray-900 transition-all text-left">
           <Search className="w-4 h-4 shrink-0" />
-          <span className="flex-1 truncate">Ketik...</span>
-          <kbd className="hidden xl:inline-flex items-center justify-center px-1.5 text-[10px] font-medium text-gray-400 border border-gray-200 bg-gray-50 rounded">⌘K</kbd>
+          <span className="flex-1 truncate">Cari cepat...</span>
+          <kbd className="hidden xl:inline-flex items-center justify-center px-1.5 text-[10px] font-medium font-mono text-gray-400 border border-gray-200 bg-gray-50 rounded">⌘K</kbd>
         </button>
-        <button onClick={() => useUIStore.getState().setQuickAddOpen(true)} className="flex shrink-0 items-center justify-center w-9 h-9 text-gray-600 bg-white border border-gray-200 rounded-lg shadow-sm hover:border-gray-300 hover:text-gray-900 hover:bg-gray-50 transition-all" title="Tangkapan Kilat (Cmd+Shift+I)">
+        <button onClick={() => useUIStore.getState().setQuickAddOpen(true)} className="flex shrink-0 items-center justify-center w-9 h-9 text-gray-600 bg-white border border-gray-200 rounded-xl shadow-sm hover:border-gray-300 hover:text-gray-900 hover:bg-gray-50 transition-all" title="Tangkapan Kilat (Cmd+Shift+I)">
           <Zap className="w-4 h-4" />
         </button>
       </div>
 
       <nav className="flex-1 space-y-8 overflow-y-auto pr-2 no-scrollbar">
         
-        {/* Workspace */}
+        {/* Ruang Kerja */}
         <div>
-          <h4 className="px-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Workspace</h4>
+          <h4 className="px-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Ruang Kerja</h4>
           <div className="space-y-0.5">
             {workspaceItems.map((item) => (
               <NavLink
@@ -68,10 +68,10 @@ export function Sidebar() {
                 to={item.href}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-200",
+                    "flex items-center gap-3 px-3 py-2 rounded-xl text-[13px] font-medium transition-colors duration-150",
                     isActive
-                      ? "bg-gray-50 text-gray-800"
-                      : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                      ? "bg-gray-100 text-gray-900 font-semibold"
+                      : "text-gray-600 hover:bg-gray-100/70 hover:text-gray-900"
                   )
                 }
               >
@@ -86,7 +86,7 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Recent */}
+        {/* Terkini */}
         {recentItems.length > 0 && (
           <div>
             <h4 className="px-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -97,9 +97,13 @@ export function Sidebar() {
                 <button
                   key={`${item.type}-${item.id}`}
                   onClick={() => navigate(item.type === 'note' ? `/notes/${item.id}` : `/writing/${item.id}`)}
-                  className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg text-[13px] font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors text-left"
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-[13px] font-medium text-gray-600 hover:bg-gray-100/70 hover:text-gray-900 transition-colors text-left"
                 >
-                  <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", item.type === 'note' ? 'bg-gray-400' : 'bg-gray-400')} />
+                  {item.type === 'note' ? (
+                    <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  ) : (
+                    <PenTool className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  )}
                   <span className="truncate">{item.title}</span>
                 </button>
               ))}
@@ -124,24 +128,24 @@ export function Sidebar() {
           to="/analytics"
           className={({ isActive }) =>
             cn(
-              "flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors",
+              "flex items-center gap-3 px-3 py-2 rounded-xl text-[13px] font-medium transition-colors",
               isActive
-                ? "bg-gray-100 text-gray-900"
-                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                ? "bg-gray-100 text-gray-900 font-semibold"
+                : "text-gray-600 hover:bg-gray-100/70 hover:text-gray-900"
             )
           }
         >
           <BarChart2 className="w-4 h-4 text-gray-400" />
-          Analytics
+          Analitik
         </NavLink>
         <NavLink
           to="/settings"
           className={({ isActive }) =>
             cn(
-              "flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors",
+              "flex items-center gap-3 px-3 py-2 rounded-xl text-[13px] font-medium transition-colors",
               isActive
-                ? "bg-gray-100 text-gray-900"
-                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                ? "bg-gray-100 text-gray-900 font-semibold"
+                : "text-gray-600 hover:bg-gray-100/70 hover:text-gray-900"
             )
           }
         >
@@ -153,7 +157,7 @@ export function Sidebar() {
             useAuthStore.getState().logout();
             navigate("/login");
           }}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors text-left"
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-[13px] font-medium text-gray-600 hover:bg-gray-100/70 hover:text-gray-900 transition-colors text-left"
         >
           <LogOut className="w-4 h-4 text-gray-400" />
           Keluar

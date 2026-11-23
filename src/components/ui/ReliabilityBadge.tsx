@@ -56,13 +56,13 @@ export function ReliabilityBadge({
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium font-mono border border-gray-200 bg-gray-50 text-gray-700 ${className}`}
+      className={`inline-flex items-center text-[11px] font-medium font-mono text-gray-500 ${className}`}
       title={`${level.label}: ${level.description} (Skor: ${score.toFixed(1)})`}
     >
       <span>{level.shortLabel}</span>
       {showDescription && (
-        <span className="ml-1 text-gray-400 font-sans text-[9px] font-normal">
-          &middot; {level.description}
+        <span className="ml-1 text-gray-400 font-sans text-[11px] font-normal">
+          · {level.description}
         </span>
       )}
     </span>

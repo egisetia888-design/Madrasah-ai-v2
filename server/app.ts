@@ -1,8 +1,8 @@
 import express from "express";
-import path from "path";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import rateLimit from "express-rate-limit";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 
 dotenv.config();
 
@@ -11,18 +11,189 @@ process.on('unhandledRejection', (reason: any) => {
   console.warn('[Process Warning] Handled late unhandled promise rejection:', reason?.message || reason);
 });
 
-// In-memory cache for AI responses
-const aiCache = new Map<string, { timestamp: number, data: any }>();
-const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+// =============================================================================
+// Bounded LRU Cache (TTL 2 hours, max 500 entries) with SHA-256 Key Hashing
+// =============================================================================
+const CACHE_TTL = 1000 * 60 * 60 * 2; // 2 hours
+const MAX_CACHE_ENTRIES = 500;
 
-function getCacheKey(endpoint: string, body: any) {
-  return `${endpoint}:${JSON.stringify(body)}`;
+class BoundedAICache {
+  private store = new Map<string, { timestamp: number; data: any }>();
+
+  get(key: string): any | null {
+    const entry = this.store.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp >= CACHE_TTL) {
+      this.store.delete(key);
+      return null;
+    }
+    // Refresh LRU recency
+    this.store.delete(key);
+    this.store.set(key, entry);
+    return entry.data;
+  }
+
+  set(key: string, data: any): void {
+    if (this.store.has(key)) {
+      this.store.delete(key);
+    } else if (this.store.size >= MAX_CACHE_ENTRIES) {
+      const oldestKey = this.store.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.store.delete(oldestKey);
+      }
+    }
+    this.store.set(key, { timestamp: Date.now(), data });
+  }
 }
 
-/**
- * Attempts to repair JSON that was prematurely cut off by LLM token limits
- * by closing unclosed strings, dangling keys, and balancing delimiters.
- */
+const aiCache = new BoundedAICache();
+
+function getCacheKey(endpoint: string, payload: unknown): string {
+  const hash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(payload))
+    .digest("hex")
+    .slice(0, 24);
+  return `${endpoint}:${hash}`;
+}
+
+// =============================================================================
+// Token-Saving Text Compression & Relevance Pruning Utilities
+// =============================================================================
+function compactText(input: unknown, maxChars: number): string {
+  const normalized = String(input ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (normalized.length <= maxChars) return normalized;
+  return normalized.slice(0, maxChars).trimEnd() + "…";
+}
+
+function headTailExcerpt(input: unknown, maxChars: number): string {
+  const normalized = String(input ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (normalized.length <= maxChars) return normalized;
+  const headLen = Math.floor(maxChars * 0.65);
+  const tailLen = Math.max(0, maxChars - headLen - 7);
+  return `${normalized.slice(0, headLen).trimEnd()}\n[...]\n${normalized.slice(normalized.length - tailLen).trimStart()}`;
+}
+
+const STOPWORDS = new Set([
+  "yang", "dan", "atau", "dari", "pada", "untuk", "dengan", "dalam", "adalah",
+  "ini", "itu", "apa", "bagaimana", "mengapa", "jelaskan", "tentang", "antara",
+  "the", "and", "for", "with", "that", "this", "from", "what", "how", "why"
+]);
+
+function extractQueryKeywords(prompt: string): string[] {
+  return [...new Set(
+    prompt
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w))
+  )].slice(0, 16);
+}
+
+function scoreKeywordMatch(keywords: string[], ...fields: unknown[]): number {
+  if (keywords.length === 0) return 0;
+  let score = 0;
+  fields.forEach((field, idx) => {
+    const text = String(field ?? "").toLowerCase();
+    if (!text) return;
+    const weight = idx === 0 ? 3 : 1; // Title/name weighted 3x
+    for (const kw of keywords) {
+      if (text.includes(kw)) score += weight;
+    }
+  });
+  return score;
+}
+
+function selectRelevantZettelkastenContext(
+  prompt: string,
+  notes: any[],
+  concepts: any[],
+  fragments: any[],
+  relations: any[]
+) {
+  const keywords = extractQueryKeywords(prompt);
+
+  const safeNotes = Array.isArray(notes) ? notes : [];
+  const rankedNotes = safeNotes
+    .map((n, index) => ({
+      n,
+      score: scoreKeywordMatch(keywords, n?.title, n?.content),
+      recency: Number(n?.updatedAt || n?.createdAt || 0),
+      index,
+    }))
+    .sort((a, b) => b.score - a.score || b.recency - a.recency || a.index - b.index)
+    .slice(0, 6)
+    .map(({ n }) => ({
+      id: String(n?.id || ""),
+      t: compactText(n?.title, 80),
+      c: compactText(n?.content, 350),
+    }));
+
+  const safeConcepts = Array.isArray(concepts) ? concepts : [];
+  const rankedConcepts = safeConcepts
+    .map((c, index) => ({
+      c,
+      score: scoreKeywordMatch(keywords, c?.name, c?.definition),
+      index,
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 6)
+    .map(({ c }) => ({
+      id: String(c?.id || ""),
+      n: compactText(c?.name, 60),
+      d: compactText(c?.definition, 180),
+    }));
+
+  const safeFragments = Array.isArray(fragments) ? fragments : [];
+  const rankedFragments = safeFragments
+    .map((f, index) => ({
+      f,
+      score: scoreKeywordMatch(keywords, f?.quote, f?.context),
+      index,
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 5)
+    .map(({ f }) => ({
+      q: compactText(f?.quote, 220),
+      ctx: compactText(f?.context, 100),
+    }));
+
+  const selectedIds = new Set([
+    ...rankedNotes.map((n) => n.id),
+    ...rankedConcepts.map((c) => c.id),
+  ].filter(Boolean));
+
+  const safeRelations = Array.isArray(relations) ? relations : [];
+  const rankedRelations = safeRelations
+    .filter((r) => selectedIds.has(String(r?.sourceNodeId || "")) || selectedIds.has(String(r?.targetNodeId || "")))
+    .concat(safeRelations)
+    .filter((r, idx, arr) => arr.indexOf(r) === idx)
+    .slice(0, 8)
+    .map((r) => ({
+      s: String(r?.sourceNodeId || ""),
+      t: String(r?.targetNodeId || ""),
+      type: compactText(r?.relationType || r?.type, 30),
+    }));
+
+  return {
+    notes: rankedNotes,
+    concepts: rankedConcepts,
+    fragments: rankedFragments,
+    relations: rankedRelations,
+  };
+}
+
+// =============================================================================
+// JSON Recovery Utilities
+// =============================================================================
 function repairTruncatedJson(str: string): string {
   let inString = false;
   let isEscaped = false;
@@ -53,18 +224,15 @@ function repairTruncatedJson(str: string): string {
   }
 
   let repaired = str;
-  // If ended while still inside a string literal, close it
   if (inString) {
     repaired += '"';
   }
 
-  // Remove trailing dangling keys or trailing commas: e.g. `,"key": ` or `,"key"` or `, `
   repaired = repaired.trim();
   repaired = repaired.replace(/,\s*$/, '');
   repaired = repaired.replace(/,\s*"[^"]*"\s*:\s*$/, '');
   repaired = repaired.replace(/,\s*"[^"]*"\s*$/, '');
 
-  // Close all remaining unclosed braces and brackets in LIFO order
   while (stack.length > 0) {
     const openChar = stack.pop();
     if (openChar === '{') repaired += '}';
@@ -78,7 +246,6 @@ function cleanAndParseJson(text: string, fallback: any = {}) {
   if (!text) return fallback;
   try {
     let cleanText = text.trim();
-    // Strip markdown code fences if present anywhere in text
     cleanText = cleanText.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1').trim();
     if (cleanText.startsWith("```")) {
       cleanText = cleanText.replace(/^```[a-zA-Z0-9_-]*\n?/, "");
@@ -87,12 +254,10 @@ function cleanAndParseJson(text: string, fallback: any = {}) {
       }
     }
     cleanText = cleanText.trim();
-    
-    // Direct parse attempt
+
     try {
       return JSON.parse(cleanText);
     } catch (directErr) {
-      // Find candidate starting with outermost brace or bracket
       const firstBrace = cleanText.indexOf('{');
       const firstBracket = cleanText.indexOf('[');
       let candidate = cleanText;
@@ -102,15 +267,13 @@ function cleanAndParseJson(text: string, fallback: any = {}) {
         candidate = cleanText.substring(firstBracket);
       }
 
-      // Try repairing potentially truncated JSON
       try {
         const repaired = repairTruncatedJson(candidate);
         const sanitized = repaired
           .replace(/,\s*}/g, '}')
           .replace(/,\s*]/g, ']');
         return JSON.parse(sanitized);
-      } catch (repairErr) {
-        // As secondary fallback, check substring between first and last delimiters if present
+      } catch {
         const lastBrace = cleanText.lastIndexOf('}');
         const lastBracket = cleanText.lastIndexOf(']');
         let sliceCandidate = "";
@@ -129,7 +292,7 @@ function cleanAndParseJson(text: string, fallback: any = {}) {
         throw directErr;
       }
     }
-  } catch (error) {
+  } catch {
     if (fallback !== null) {
       console.error("JSON Parsing Error on AI output:", text.substring(0, 150) + "...");
     }
@@ -137,21 +300,62 @@ function cleanAndParseJson(text: string, fallback: any = {}) {
   }
 }
 
-// Lazy initialize GoogleGenAI client
+// =============================================================================
+// Pure Google Gemini (@google/genai) Hybrid Engine
+// =============================================================================
+const GEMINI_LITE_MODEL = "gemini-3.1-flash-lite";
+const GEMINI_SYNTHESIS_MODEL = "gemini-4-hydrogen";
+
+const DEPRECATED_MODELS = new Set([
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-pro",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-001",
+  "gemini-2.0-pro",
+  "gemini-2.0-flash-thinking",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-pro",
+]);
+
+let loggedLegacyModelOverride = false;
+
+function normalizeModelName(model: string): string {
+  return model.trim().replace(/^models\//i, "");
+}
+
+function isLegacyOrUnsupportedModel(model: string): boolean {
+  const lower = normalizeModelName(model).toLowerCase();
+  if (!lower) return true;
+  if (DEPRECATED_MODELS.has(lower)) return true;
+  if (/^gemini-(1|2)(\.|$|-)/i.test(lower)) return true;
+  return false;
+}
+
 let genAIClient: GoogleGenAI | null = null;
-function getGeminiClient(): GoogleGenAI | null {
-  if (!genAIClient && process.env.GEMINI_API_KEY) {
+let cachedApiKey = "";
+
+function getGeminiClient(): GoogleGenAI {
+  const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY belum dikonfigurasi. Periksa pengaturan di Settings > Secrets.");
+  }
+  if (!genAIClient || cachedApiKey !== apiKey) {
+    cachedApiKey = apiKey;
     genAIClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey,
       httpOptions: {
         headers: {
-          'User-Agent': 'madrasah-pkos',
-        }
-      }
+          'User-Agent': 'aistudio-build',
+        },
+      },
     });
   }
   return genAIClient;
 }
+
+type AIModelTier = "lite" | "synthesis";
 
 interface AICallOptions {
   systemInstruction: string;
@@ -159,386 +363,201 @@ interface AICallOptions {
   jsonMode?: boolean;
   responseSchema?: any;
   timeoutMs?: number;
-  tools?: any[];
-  maxTokens?: number;
-  temperature?: number;
-  purpose?: string;
+  modelTier: AIModelTier;
+  purpose: string;
 }
 
-function parseModelList(rawValue: string | undefined, excluded: string[] = []): string[] {
-  if (!rawValue) return [];
-  return [...new Set(
-    rawValue
-      .split(/[,\n;]+/)
-      .flatMap((part: string) => part.split(/\s+/))
-      .map((m: string) => m.trim())
-      .filter((m: string) => m.length > 0 && !excluded.includes(m))
-  )];
+function resolveCandidateModels(tier: AIModelTier): string[] {
+  const rawOverride = normalizeModelName(process.env.GEMINI_MODEL || "");
+  const primary = tier === "lite" ? GEMINI_LITE_MODEL : GEMINI_SYNTHESIS_MODEL;
+  const secondary = tier === "lite" ? GEMINI_SYNTHESIS_MODEL : GEMINI_LITE_MODEL;
+
+  const models: string[] = [];
+  if (rawOverride) {
+    if (isLegacyOrUnsupportedModel(rawOverride)) {
+      if (!loggedLegacyModelOverride) {
+        loggedLegacyModelOverride = true;
+        console.info(`[Google Gemini] Abaikan GEMINI_MODEL usang "${rawOverride}", gunakan model resmi ${primary}.`);
+      }
+    } else {
+      models.push(rawOverride);
+    }
+  }
+  if (!models.includes(primary)) models.push(primary);
+  if (!models.includes(secondary)) models.push(secondary);
+  return models;
 }
 
-function formatAIEndpoint(rawBaseUrl?: string): string {
-  let url = (rawBaseUrl || "").trim();
-  if (!url) return "https://openrouter.ai/api/v1/chat/completions";
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    url = `https://${url}`;
+function getThinkingConfigForModel(model: string) {
+  const lower = model.toLowerCase();
+  if (lower.includes("flash-lite")) {
+    return { thinkingLevel: ThinkingLevel.MINIMAL };
   }
-  url = url.replace(/\/+$/, "");
-  if (url.endsWith("/chat/completions")) {
-    return url;
+  if (lower.startsWith("gemini-4") || lower.startsWith("gemini-3")) {
+    return { thinkingLevel: ThinkingLevel.LOW };
   }
-  if (url.endsWith("/v1")) {
-    return `${url}/chat/completions`;
-  }
-  return `${url}/chat/completions`;
+  return undefined;
+}
+
+function isQuotaError(err: any): boolean {
+  const msg = String(err?.message || err || "");
+  return err?.status === 429 || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED");
+}
+
+function isTimeoutOrAbortError(err: any): boolean {
+  const msg = String(err?.message || err || "");
+  return (
+    err?.name === "AbortError" ||
+    /abort|timed?\s*out|timeout|ETIMEDOUT/i.test(msg)
+  );
+}
+
+function isTransientError(err: any): boolean {
+  const msg = String(err?.message || err || "");
+  return (
+    err?.status === 503 ||
+    err?.status === 500 ||
+    msg.includes("503") ||
+    msg.includes("UNAVAILABLE") ||
+    /ECONNRESET|ETIMEDOUT|fetch failed|network/i.test(msg)
+  );
+}
+
+function isAuthError(err: any): boolean {
+  const msg = String(err?.message || err || "");
+  return (
+    err?.status === 401 ||
+    err?.status === 403 ||
+    msg.includes("PERMISSION_DENIED") ||
+    msg.includes("API_KEY_INVALID") ||
+    msg.includes("API key not valid")
+  );
 }
 
 async function executeAIRequest(options: AICallOptions): Promise<string> {
   const timeoutMs = options.timeoutMs || 45000;
-  const temperature = options.temperature ?? 0.2;
-  const maxTokens = options.maxTokens || 1200;
-  const purpose = options.purpose || "general";
-  const startTime = Date.now();
-  
+  const gemini = getGeminiClient();
+  const candidateModels = resolveCandidateModels(options.modelTier);
+  const startedAt = Date.now();
+  let activeController: AbortController | null = null;
+
   const aiPromise = (async () => {
-    // =========================================================================
-    // 1. TIER 1: HCNSEC / Enterprise OpenAI-compatible Provider (PRIMARY)
-    // =========================================================================
-    const hcnsecApiKey = (process.env.HCNSEC_API_KEY || process.env.AI_API_KEY || process.env.OPENAI_API_KEY || "").trim();
-    const hcnsecBaseUrl = process.env.HCNSEC_BASE_URL || process.env.AI_BASE_URL || process.env.OPENAI_BASE_URL || process.env.BASE_URL;
+    let lastError: any = null;
 
-    if (hcnsecApiKey || hcnsecBaseUrl) {
-      const apiKey = hcnsecApiKey || (process.env.OPENROUTER_API_KEY || "").trim();
-      const rawBase = (hcnsecBaseUrl || "").trim();
-      if (rawBase && !rawBase.startsWith("http://") && !rawBase.startsWith("https://")) {
-        console.warn(`[AI Provider: HCNSEC] HCNSEC_BASE_URL "${rawBase}" missing URL scheme, auto-prefixing https://.`);
-      }
-      if (!hcnsecApiKey) {
-        console.warn("[AI Provider: HCNSEC] HCNSEC_BASE_URL set but HCNSEC_API_KEY is empty; requests will likely fail with 401.");
-      }
-      const endpoint = formatAIEndpoint(hcnsecBaseUrl);
+    for (let i = 0; i < candidateModels.length; i++) {
+      const model = candidateModels[i];
+      const thinkingConfig = getThinkingConfigForModel(model);
+      const hasFallbackModel = i < candidateModels.length - 1;
 
-      // Model priority for HCNSEC (verified live 2026-09-20 via /v1/models + chat probes):
-      // - Light load (<=~100 tokens out): Qwen3.8-27B (~2.4s), glm-5.3-flash (~2.4s),
-      //   Qwen3.8-Flash-Next (~4s), auto (~8.6s) all OK.
-      // - Heavy load (~2000 tokens JSON, syllabus): ONLY "auto" succeeds (~19s, valid JSON).
-      //   Qwen3.8-27B/DeepSeek-V4.1-Flash/glm-5.3 time out, glm-5.3-flash -> 524,
-      //   Qwen3.8-Flash-Next -> 500 no channel, step-3.7-flash -> truncated JSON.
-      // - Broken upstream (never auto-tried, always stripped from HCNSEC_MODEL):
-      //   DeepSeek-V4-Pro (404 openai_error), DeepSeek-V4-Flash / DeepSeek-V4.1-Flash
-      //   (timeout), qwen3.8-max (500 no channel). Permanently unresponsive: kimi-k3, MiniMax-M3.
-      // Hence purpose-aware ordering: heavy purposes try "auto" first; light purposes
-      // prefer the fastest model. HCNSEC_MODEL supports a comma/semicolon/space separated list.
-      const BROKEN_HCNSEC_MODELS = new Set(
-        ["kimi-k3", "minimax-m3", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4.1-flash", "qwen3.8-max"]
-      );
-      const excludedHcnsecModels = ["kimi-k3", "MiniMax-M3"];
-      const rawConfiguredModels = parseModelList(
-        process.env.HCNSEC_MODEL || process.env.AI_MODEL || "",
-        excludedHcnsecModels
-      );
-      // Strip broken upstream models case-insensitively so a stale server env
-      // (e.g. HCNSEC_MODEL=DeepSeek-V4-Pro,Qwen3.8-27B) can never trigger a 404 loop.
-      const configuredModels = rawConfiguredModels.filter((m) => {
-        if (BROKEN_HCNSEC_MODELS.has(m.toLowerCase())) {
-          console.warn(`[AI Provider: HCNSEC] Skipping known-broken model "${m}" from HCNSEC_MODEL.`);
-          return false;
+      // Exponential backoff for transient 503/network spikes (max 2 attempts per model)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const elapsedMs = Date.now() - startedAt;
+        const remainingMs = timeoutMs - elapsedMs;
+        if (remainingMs <= 1000) {
+          throw new Error("Permintaan AI melebihi batas waktu maksimal. Silakan coba lagi.");
         }
-        return true;
-      });
-      const isHeavyPurpose = purpose === "generate-syllabus" || purpose === "generate-flashcards";
-      const candidateModels: string[] = [];
 
-      if (isHeavyPurpose && !candidateModels.includes("auto")) {
-        candidateModels.push("auto");
-      }
-      for (const m of configuredModels) {
-        if (!candidateModels.includes(m)) candidateModels.push(m);
-      }
+        const attemptTimeoutMs = hasFallbackModel
+          ? Math.min(20000, Math.max(7000, Math.floor(remainingMs * 0.55)))
+          : Math.max(2000, remainingMs - 400);
 
-      const hcnsecFallbackModels = isHeavyPurpose
-        ? ["Qwen3.8-27B", "glm-5.3-flash"]
-        : [
-            "Qwen3.8-27B",
-            "glm-5.3-flash",
-            "Qwen3.8-Flash-Next",
-            "auto"
-          ];
-      for (const fallback of hcnsecFallbackModels) {
-        if (!candidateModels.includes(fallback)) {
-          candidateModels.push(fallback);
-        }
-      }
-
-      const messages = [
-        { role: "system", content: options.systemInstruction },
-        { role: "user", content: options.userPrompt }
-      ];
-
-      console.log(`[AI Provider: HCNSEC] Tier 1 attempt (${purpose}) endpoint=${endpoint} candidates=${candidateModels.join(", ") || "(none)"}`);
-
-      for (let modelIdx = 0; modelIdx < candidateModels.length; modelIdx++) {
-        const model = candidateModels[modelIdx];
-        const remainingTime = timeoutMs - (Date.now() - startTime);
-        if (remainingTime < 8000) break; // Reserve time for subsequent tiers
-
-        // Shorter per-model budget so a hung HCNSEC host cannot starve Tier 2/3.
-        // Fast 4xx errors just skip to next model. Heavy purposes (syllabus/flashcards)
-        // need a larger budget: only "auto" survives them (~19s), hence 30s budget.
-        const maxModelTime = isHeavyPurpose ? 30000 : 10000;
-        const reserveMs = isHeavyPurpose ? 15000 : 15000;
-        const modelTimeout = Math.max(5000, Math.min(maxModelTime, remainingTime - reserveMs));
-        
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), modelTimeout);
+        activeController = controller;
+        const attemptTimer = setTimeout(() => controller.abort(), attemptTimeoutMs);
 
         try {
-          const body: any = {
-            model,
-            messages,
-            temperature,
-            max_tokens: maxTokens
+          if (attempt > 0) {
+            await new Promise((r) => setTimeout(r, 700 * attempt));
+          }
+
+          const config: any = {
+            systemInstruction: options.systemInstruction,
+            abortSignal: controller.signal,
           };
+          if (thinkingConfig) {
+            config.thinkingConfig = thinkingConfig;
+          }
+          if (options.jsonMode) {
+            config.responseMimeType = "application/json";
+            if (options.responseSchema) {
+              config.responseSchema = options.responseSchema;
+            }
+          }
+
+          const response = await gemini.models.generateContent({
+            model,
+            contents: options.userPrompt,
+            config,
+          });
+          clearTimeout(attemptTimer);
+
+          const text = response.text;
+          if (!text || !text.trim()) {
+            throw new Error("Respons AI kosong.");
+          }
 
           if (options.jsonMode) {
-            body.response_format = { type: "json_object" };
+            const parsed = cleanAndParseJson(text, null);
+            if (parsed === null) {
+              throw new Error("Format JSON dari model tidak valid.");
+            }
+            console.log(`[Google Gemini] Served (${options.purpose}) via ${model}`);
+            return JSON.stringify(parsed);
           }
 
-          const response = await fetch(endpoint, {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${apiKey}`,
-              "Content-Type": "application/json",
-              "HTTP-Referer": process.env.APP_URL || "https://madrasah.remix",
-              "X-Title": "Remix Madrasah"
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal
-          });
-          clearTimeout(timer);
-
-          if (response.ok) {
-            const data = await response.json() as any;
-            const content = data.choices?.[0]?.message?.content;
-            if (typeof content === "string" && content.trim()) {
-              if (options.jsonMode) {
-                const parsed = cleanAndParseJson(content, null);
-                if (parsed === null) {
-                  throw new Error("Invalid JSON generated by model (likely truncated).");
-                }
-                console.log(`[AI Provider: HCNSEC] Served (${purpose}) using model ${model}`);
-                return JSON.stringify(parsed);
-              }
-              console.log(`[AI Provider: HCNSEC] Served (${purpose}) using model ${model}`);
-              return content;
-            }
-          } else {
-            const errText = await response.text();
-            const errPreview = errText.slice(0, 500);
-            const errLower = errText.toLowerCase();
-            if (response.status === 401 || response.status === 403) {
-              console.warn(`[AI Provider: HCNSEC] Model ${model} auth failed (${response.status}) at ${endpoint}:`, errPreview);
-              console.warn("[AI Provider: HCNSEC] Invalid API key — skipping remaining HCNSEC models, failing over to Tier 2...");
-              break;
-            }
-            if (response.status === 404 || response.status === 400 || errLower.includes("model_not_found") || errLower.includes("invalid_model") || errLower.includes("does not exist")) {
-              console.warn(`[AI Provider: HCNSEC] Model ${model} not found on upstream (${response.status}) at ${endpoint}:`, errPreview);
-              continue;
-            }
-            console.warn(`[AI Provider: HCNSEC] Model ${model} returned status ${response.status} at ${endpoint}:`, errPreview);
-          }
+          console.log(`[Google Gemini] Served (${options.purpose}) via ${model}`);
+          return text;
         } catch (err: any) {
-          clearTimeout(timer);
-          const errMsg = String(err?.message || err || "");
-          const isAborted = controller.signal.aborted || err?.name === 'AbortError' || errMsg.includes('aborted');
-          console.warn(`[AI Provider: HCNSEC] Model ${model} failed:`, errMsg);
-          if (isAborted) {
-            const hasNextModel = modelIdx < candidateModels.length - 1;
-            const timeAfterAbort = timeoutMs - (Date.now() - startTime);
-            // Heavy purposes must still reach "auto" (the only model surviving
-            // ~2000-token JSON); only fast-fail when no candidate remains or when
-            // continuing would starve Tier 2/3. Light purposes keep old fast-fail.
-            if (isHeavyPurpose && hasNextModel && timeAfterAbort > reserveMs + 8000) {
-              console.warn(`[AI Provider: HCNSEC] Model ${model} timed out after ${modelTimeout}ms — trying next HCNSEC candidate (${candidateModels[modelIdx + 1]})...`);
-              continue;
-            }
-            console.warn(`[AI Provider: HCNSEC] Endpoint is unresponsive (timed out after ${modelTimeout}ms). Fast-failing HCNSEC to preserve time for Tier 2/3...`);
-            break; // Fast-fail to Tier 2 immediately instead of hanging again on same host
+          clearTimeout(attemptTimer);
+          const timedOutAttempt = controller.signal.aborted || isTimeoutOrAbortError(err);
+          lastError = timedOutAttempt
+            ? Object.assign(new Error(`Permintaan ke ${model} melebihi batas waktu (${Math.round(attemptTimeoutMs / 1000)}d).`), { name: "AbortError" })
+            : err;
+          console.warn(`[Google Gemini] ${model} (attempt ${attempt + 1}) failed for ${options.purpose}:`, lastError?.message || lastError);
+
+          if (isAuthError(err)) {
+            throw new Error("Kunci API Google Gemini tidak valid atau ditolak. Periksa GEMINI_API_KEY di Settings > Secrets.");
           }
-          if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|Failed to fetch|fetch failed|network/i.test(errMsg)) {
-            console.warn(`[AI Provider: HCNSEC] Network-level failure at ${endpoint} — skipping remaining HCNSEC models.`);
+
+          // On timeout for this model, skip retrying the same slow model and immediately fail over to the next candidate model
+          if (timedOutAttempt) {
             break;
           }
+
+          if (isTransientError(err) && attempt === 0) {
+            continue;
+          }
+          break;
         }
       }
-      console.warn("[AI Provider] HCNSEC models exhausted or unresponsive, seamlessly switching to Tier 2 (OpenRouter)...");
-    }
 
-    // =========================================================================
-    // 2. TIER 2: OpenRouter Multi-Model Provider (SECONDARY STABILITY PROVIDER)
-    // =========================================================================
-    if (process.env.OPENROUTER_API_KEY) {
-      const orApiKey = process.env.OPENROUTER_API_KEY.trim();
-      // OPENROUTER_MODEL also accepts a comma/semicolon/space separated list.
-      const configuredOrModels = parseModelList(process.env.OPENROUTER_MODEL || "", ["google/gemini-2.0-flash-001"]);
-
-      const orCandidateModels: string[] = [...configuredOrModels];
-      orCandidateModels.push(
-        "deepseek/deepseek-chat",
-        "qwen/qwen-2.5-72b-instruct",
-        "google/gemini-2.5-flash",
-        "meta-llama/llama-3.3-70b-instruct"
-      );
-      const uniqueOrModels = [...new Set(orCandidateModels)];
-
-      const messages = [
-        { role: "system", content: options.systemInstruction },
-        { role: "user", content: options.userPrompt }
-      ];
-
-      for (const model of uniqueOrModels) {
-        const remainingTime = timeoutMs - (Date.now() - startTime);
-        if (remainingTime < 10000) break; // Reserve at least 10s for Tier 3
-
-        const maxModelTime = purpose === "generate-syllabus" ? 22000 : 14000;
-        const modelTimeout = Math.max(6000, Math.min(maxModelTime, remainingTime - 8000));
-        
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), modelTimeout);
-
-        try {
-          const body: any = {
-            model,
-            messages,
-            temperature,
-            max_tokens: maxTokens
-          };
-
-          if (options.jsonMode) {
-            body.response_format = { type: "json_object" };
-          }
-
-          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${orApiKey}`,
-              "Content-Type": "application/json",
-              "HTTP-Referer": process.env.APP_URL || "https://madrasah.remix",
-              "X-Title": "Remix Madrasah"
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal
-          });
-          clearTimeout(timer);
-
-          if (response.ok) {
-            const data = await response.json() as any;
-            const content = data.choices?.[0]?.message?.content;
-            if (typeof content === "string" && content.trim()) {
-              if (options.jsonMode) {
-                const parsed = cleanAndParseJson(content, null);
-                if (parsed === null) {
-                  throw new Error("Invalid JSON generated by model (likely truncated).");
-                }
-                console.log(`[AI Provider: OpenRouter] Served (${purpose}) using model ${model}`);
-                return JSON.stringify(parsed);
-              }
-              console.log(`[AI Provider: OpenRouter] Served (${purpose}) using model ${model}`);
-              return content;
-            }
-          } else {
-            const errText = await response.text();
-            console.warn(`[AI Provider: OpenRouter] Model ${model} returned status ${response.status}:`, errText.slice(0, 500));
-          }
-        } catch (err: any) {
-          clearTimeout(timer);
-          console.warn(`[AI Provider: OpenRouter] Model ${model} failed:`, err?.message || err);
-        }
-      }
-      console.warn("[AI Provider] OpenRouter models exhausted or unresponsive, checking last-resort fallback...");
-    }
-
-    // =========================================================================
-    // 3. TIER 3: Google GenAI SDK (LAST-RESORT SAFETY NET ONLY)
-    // =========================================================================
-    const gemini = getGeminiClient();
-    if (gemini) {
-      try {
-        console.log(`[AI Provider: Gemini SDK] Invoking last-resort safety net for (${purpose})...`);
-        const config: any = {
-          systemInstruction: options.systemInstruction,
-          temperature
-        };
-        if (options.maxTokens) {
-          config.maxOutputTokens = options.maxTokens;
-        }
-        if (options.jsonMode) {
-          config.responseMimeType = "application/json";
-          if (options.responseSchema) {
-            config.responseSchema = options.responseSchema;
-          }
-        }
-        if (options.tools) {
-          config.tools = options.tools;
-        }
-
-        const geminiModels = [
-          process.env.GEMINI_MODEL,
-          "gemini-2.5-flash",
-          "gemini-2.0-flash"
-        ].filter(Boolean) as string[];
-        const uniqueGeminiModels = [...new Set(geminiModels)];
-
-        let lastGeminiError: any = null;
-
-        for (const geminiModel of uniqueGeminiModels) {
-          try {
-            // If previous model hit 503 (high demand spike), brief 600ms pause
-            if (lastGeminiError && (lastGeminiError?.status === 503 || String(lastGeminiError?.message).includes('503'))) {
-              await new Promise(r => setTimeout(r, 600));
-            }
-
-            const response = await gemini.models.generateContent({
-              model: geminiModel,
-              contents: options.userPrompt,
-              config
-            });
-
-            if (response.text) {
-              if (options.jsonMode) {
-                const parsed = cleanAndParseJson(response.text, null);
-                if (parsed === null) {
-                  throw new Error("Invalid JSON generated by model (likely truncated).");
-                }
-                console.log(`[AI Provider: Gemini SDK] Served (${purpose}) via ${geminiModel}`);
-                return JSON.stringify(parsed);
-              }
-              console.log(`[AI Provider: Gemini SDK] Served (${purpose}) via ${geminiModel}`);
-              return response.text;
-            }
-          } catch (modelErr: any) {
-            lastGeminiError = modelErr;
-            console.warn(`[AI Provider: Gemini SDK] Model ${geminiModel} failed:`, modelErr?.message || modelErr);
-            if (modelErr?.message?.includes('429') || modelErr?.message?.includes('RESOURCE_EXHAUSTED')) {
-              continue;
-            }
-          }
-        }
-        if (lastGeminiError) {
-          throw lastGeminiError;
-        }
-      } catch (err: any) {
-        console.warn("[AI Provider: Gemini SDK] Last-resort fallback failed:", err?.message || err);
-        if (err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED')) {
-          throw new Error("Kuota AI pada semua penyedia telah habis (Rate Limit 429). Silakan tunggu beberapa saat.");
-        }
-        if (err?.message?.includes('503') || err?.status === 503) {
-          throw new Error("Layanan model AI sedang mengalami lonjakan beban tinggi (503). Silakan coba sesaat lagi.");
-        }
-        throw new Error(`AI Provider Error: ${err?.message || err}`);
+      if (
+        lastError &&
+        !isTimeoutOrAbortError(lastError) &&
+        !isQuotaError(lastError) &&
+        !isTransientError(lastError) &&
+        !String(lastError?.message || "").includes("404") &&
+        !String(lastError?.message || "").includes("NOT_FOUND") &&
+        !String(lastError?.message || "").includes("JSON")
+      ) {
+        break;
       }
     }
 
-    throw new Error("Layanan AI mandiri (HCNSEC / OpenRouter) tidak dapat dihubungi dan tidak ada cadangan aktif. Periksa konfigurasi di Settings > Secrets.");
+    if (lastError) {
+      if (isTimeoutOrAbortError(lastError)) {
+        throw new Error("Permintaan AI melebihi batas waktu maksimal. Silakan coba lagi.");
+      }
+      if (isQuotaError(lastError)) {
+        throw new Error("Kuota Google Gemini API sedang mencapai batas (Rate Limit 429). Silakan tunggu beberapa saat atau periksa kuota di Settings > Secrets.");
+      }
+      if (isTransientError(lastError)) {
+        throw new Error("Layanan Google Gemini sedang mengalami lonjakan beban (503). Silakan coba sesaat lagi.");
+      }
+      throw new Error(`Google Gemini Error: ${lastError?.message || lastError}`);
+    }
+
+    throw new Error("Gagal memproses permintaan Google Gemini.");
   })();
 
   let isSettled = false;
@@ -548,15 +567,15 @@ async function executeAIRequest(options: AICallOptions): Promise<string> {
     timeoutTimer = setTimeout(() => {
       if (!isSettled) {
         isSettled = true;
+        activeController?.abort();
         reject(new Error("Permintaan AI melebihi batas waktu maksimal. Silakan coba lagi."));
       }
     }, timeoutMs);
   });
 
   aiPromise.catch((err) => {
-    // Safely absorb any background rejection if timeout already won the race
     if (isSettled) {
-      console.debug("[AI Provider] Late background operation error absorbed:", err?.message || err);
+      console.debug("[Google Gemini] Late background error absorbed:", err?.message || err);
     }
   });
 
@@ -626,59 +645,43 @@ apiRouter.get("/health", (req, res) => {
   });
 });
 
-// AI Routes
+// AI Routes (100% Google Gemini Hybrid Architecture)
   apiRouter.post("/ai/zettelkasten", async (req, res) => {
     try {
       const { prompt, notes = [], concepts = [], fragments = [], relations = [] } = req.body;
-      const sanitizedNotes = Array.isArray(notes) 
-        ? notes.slice(0, 10).map((n: any) => ({ id: n.id, title: n.title, excerpt: (n.content || '').slice(0, 500) }))
-        : [];
-      
-      const sanitizedConcepts = Array.isArray(concepts)
-        ? concepts.slice(0, 5).map((c: any) => ({ name: c.name, definition: c.definition })) : [];
-        
-      const sanitizedFragments = Array.isArray(fragments)
-        ? fragments.slice(0, 5).map((f: any) => ({ quote: f.quote, context: f.context })) : [];
-
-      const cacheKey = getCacheKey("zettelkasten", { prompt, notesCount: sanitizedNotes.length });
-      
-      const cached = aiCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log(`[Cache Hit] /api/ai/zettelkasten`);
-        return res.json(cached.data);
+      const cleanPrompt = compactText(prompt, 1200);
+      if (!cleanPrompt) {
+        return res.status(400).json({ error: "Pertanyaan tidak boleh kosong." });
       }
-      
-      const systemInstruction = `
-      You are the Madrasah PKOS Knowledge Synthesis Engine.
-      Analyze the user's semantic knowledge base with precision and intellectual humility (ta'dib).
-      Your objectives:
-      1. Conceptual Synthesis: Synthesize core ideas directly grounded in the provided notes, concepts, and source fragments (preserve provenance).
-      2. Semantic Relationships: Identify genuine connections, contradictions, or complementary relationships between knowledge blocks.
-      3. Epistemic Gaps & Thought Trajectories: Point out logical gaps, missing premises, or promising directions for deeper inquiry.
 
-      Strict Rules:
-      - Output in clean, articulate Indonesian Markdown.
-      - Cite exact note titles or source quotes when making assertions.
-      - Be concise, analytical, and completely free of conversational filler, sycophancy, or marketing clichés.
-      
-      User's Context:
-      Notes: ${JSON.stringify(sanitizedNotes)}
-      Concepts: ${JSON.stringify(sanitizedConcepts)}
-      Source Fragments: ${JSON.stringify(sanitizedFragments)}
-      Relations: ${JSON.stringify(relations.slice(0, 10))}
-      `;
+      const ctx = selectRelevantZettelkastenContext(cleanPrompt, notes, concepts, fragments, relations);
+      const cacheKey = getCacheKey("zettelkasten", { prompt: cleanPrompt.toLowerCase(), ctx });
+
+      const cached = aiCache.get(cacheKey);
+      if (cached) {
+        console.log(`[Cache Hit] /api/ai/zettelkasten`);
+        return res.json(cached);
+      }
+
+      const systemInstruction = `Mesin Sintesis Pengetahuan Madrasah (prinsip ta'dib).
+Tugas:
+1. Sintesis konsep berbasis catatan, konsep, dan kutipan yang diberikan.
+2. Identifikasi relasi atau kontradiksi antar gagasan.
+3. Tunjukkan celah logis atau arah pendalaman.
+Aturan:
+- Bahasa Indonesia Markdown ringkas dan analitis (maksimal ~350 kata, tanpa basa-basi).
+- Kutip judul catatan/sumber persis bila merujuk.
+Konteks: ${JSON.stringify(ctx)}`;
 
       const text = await executeAIRequest({
         systemInstruction,
-        userPrompt: String(prompt || '').slice(0, 2000),
-        temperature: 0.25,
-        maxTokens: 1200,
+        userPrompt: cleanPrompt,
+        modelTier: "synthesis",
         purpose: "zettelkasten"
       });
 
       const resultData = { result: text };
-      
-      aiCache.set(cacheKey, { timestamp: Date.now(), data: resultData });
+      aiCache.set(cacheKey, resultData);
       res.json(resultData);
     } catch (error: any) {
       console.error("AI Assistant Error:", error);
@@ -689,38 +692,32 @@ apiRouter.get("/health", (req, res) => {
   apiRouter.post("/ai/suggest-tags", async (req, res) => {
     try {
       const { content, notes = [], concepts = [] } = req.body;
-      const sanitizedContent = String(content || '').slice(0, 4000);
-      const sanitizedNotes = Array.isArray(notes)
-        ? notes.slice(0, 10).map((n: any) => ({ id: n.id, title: n.title }))
-        : [];
-      const sanitizedConcepts = Array.isArray(concepts)
-        ? concepts.slice(0, 10).map((c: any) => ({ id: c.id, name: c.name }))
-        : [];
-
-      const cacheKey = getCacheKey("suggest-tags", { content: sanitizedContent });
-      
-      const cached = aiCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log(`[Cache Hit] /api/ai/suggest-tags`);
-        return res.json(cached.data);
+      const sanitizedContent = headTailExcerpt(content, 2200);
+      if (!sanitizedContent) {
+        return res.status(400).json({ error: "Konten tidak boleh kosong." });
       }
-      
-      const systemInstruction = `
-      You are the Madrasah Knowledge Taxonomy Engine.
-      Analyze the input snippet and extract concise, deterministic conceptual metadata.
 
-      Output Requirements:
-      1. tags: 3 to 5 lowercase conceptual keywords in Indonesian or English (no hashtag symbols, no spaces within a single tag).
-      2. icon: Exactly 1 valid Lucide-react icon name that best represents the semantic theme (strictly choose from: 'Brain', 'BookOpen', 'Bookmark', 'FileText', 'Lightbulb', 'Layers', 'Sparkles', 'Compass', 'Search', 'Archive', 'Code', 'PenTool', 'Scale', 'Shield', 'Target', 'Folder', 'GraduationCap').
-      3. connections: 1 to 3 exact matching titles from existing notes if there is a direct conceptual relation.
-      
-      Context references:
-      Existing Notes: ${JSON.stringify(sanitizedNotes)}
-      Existing Concepts: ${JSON.stringify(sanitizedConcepts)}
-      
-      Respond ONLY with a raw JSON object matching the schema:
-      {"tags": ["tag1", "tag2"], "icon": "BookOpen", "connections": ["Note Title"]}
-      `;
+      const noteTitles = Array.isArray(notes)
+        ? notes.slice(0, 15).map((n: any) => compactText(n?.title, 60)).filter(Boolean)
+        : [];
+      const conceptNames = Array.isArray(concepts)
+        ? concepts.slice(0, 12).map((c: any) => compactText(c?.name, 40)).filter(Boolean)
+        : [];
+
+      const cacheKey = getCacheKey("suggest-tags", { content: sanitizedContent, noteTitles, conceptNames });
+
+      const cached = aiCache.get(cacheKey);
+      if (cached) {
+        console.log(`[Cache Hit] /api/ai/suggest-tags`);
+        return res.json(cached);
+      }
+
+      const systemInstruction = `Ekstraktor Taksonomi Madrasah. Hasilkan JSON ketat:
+1. tags: 3-5 kata kunci huruf kecil tanpa '#' dan tanpa spasi dalam satu tag.
+2. icon: pilih 1 dari ['Brain','BookOpen','Bookmark','FileText','Lightbulb','Layers','Sparkles','Compass','Search','Archive','Code','PenTool','Scale','Shield','Target','Folder','GraduationCap'].
+3. connections: 0-3 judul persis dari daftar Catatan jika relevan secara langsung.
+Catatan: ${JSON.stringify(noteTitles)}
+Konsep: ${JSON.stringify(conceptNames)}`;
 
       const schema = {
         type: Type.OBJECT,
@@ -734,28 +731,25 @@ apiRouter.get("/health", (req, res) => {
 
       const text = await executeAIRequest({
         systemInstruction,
-        userPrompt: `New snippet:\n${sanitizedContent}`,
+        userPrompt: sanitizedContent,
         jsonMode: true,
         responseSchema: schema,
-        temperature: 0.1,
-        maxTokens: 350,
+        modelTier: "lite",
         purpose: "suggest-tags"
       });
 
       const parsed = cleanAndParseJson(text, { tags: [], icon: "FileText", connections: [] });
-      
       const rawTags = Array.isArray(parsed.tags) ? parsed.tags : [];
-      const tags = rawTags.map((t: any) => String(t).trim()).filter(Boolean);
-      
+      const tags = rawTags.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 5);
+
       let icon = typeof parsed.icon === 'string' ? parsed.icon.replace(/[^a-zA-Z]/g, '') : 'FileText';
       if (!icon) icon = 'FileText';
 
       const rawConns = Array.isArray(parsed.connections) ? parsed.connections : [];
-      const connections = rawConns.map((c: any) => String(c).trim()).filter(Boolean);
+      const connections = rawConns.map((c: any) => String(c).trim()).filter(Boolean).slice(0, 3);
 
       const resultData = { tags, icon, connections };
-      
-      aiCache.set(cacheKey, { timestamp: Date.now(), data: resultData });
+      aiCache.set(cacheKey, resultData);
       res.json(resultData);
     } catch (error: any) {
       console.error("AI Suggestion Error:", error);
@@ -766,28 +760,24 @@ apiRouter.get("/health", (req, res) => {
   apiRouter.post("/ai/generate-flashcards", async (req, res) => {
     try {
       const { content } = req.body;
-      const sanitizedContent = String(content || '').slice(0, 6000);
+      const sanitizedContent = headTailExcerpt(content, 4500);
+      if (!sanitizedContent) {
+        return res.status(400).json({ error: "Konten catatan tidak boleh kosong." });
+      }
 
       const cacheKey = getCacheKey("generate-flashcards", { content: sanitizedContent });
-      
-      const cached = aiCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log(`[Cache Hit] /api/ai/generate-flashcards`);
-        return res.json(cached.data);
-      }
-      
-      const systemInstruction = `
-      You are the Madrasah Spaced Repetition Flashcard Engine, strictly adhering to the SuperMemo Minimum Information Principle (MIP).
-      Extract 5-8 high-yield active recall Question & Answer pairs from the content in Indonesian.
 
-      Core Principles:
-      - 1 concept per card (atomic flashcards). Never create complex multi-part questions.
-      - Question (front): Clear, unambiguous, and focused on principles, causes, definitions, or mechanisms.
-      - Answer (back): Concise, direct, and factual (1-3 sentences maximum).
-      
-      Respond ONLY with a raw JSON object with the "flashcards" array:
-      {"flashcards": [{"front": "Pertanyaan spesifik...", "back": "Jawaban padat..."}]}
-      `;
+      const cached = aiCache.get(cacheKey);
+      if (cached) {
+        console.log(`[Cache Hit] /api/ai/generate-flashcards`);
+        return res.json(cached);
+      }
+
+      const systemInstruction = `Mesin Flashcard Spaced Repetition Madrasah (Prinsip Minimum Information SuperMemo).
+Buat 5-7 pasang Q&A active recall berbahasa Indonesia dalam JSON:
+- 1 konsep atomik per kartu.
+- front: pertanyaan singkat, spesifik, fokus pada prinsip/definisi/mekanisme.
+- back: jawaban padat dan faktual (1-2 kalimat).`;
 
       const schema = {
         type: Type.OBJECT,
@@ -809,18 +799,17 @@ apiRouter.get("/health", (req, res) => {
 
       const text = await executeAIRequest({
         systemInstruction,
-        userPrompt: `Create flashcards from this note:\n\n${sanitizedContent}`,
+        userPrompt: sanitizedContent,
         jsonMode: true,
         responseSchema: schema,
-        temperature: 0.2,
-        maxTokens: 1000,
         timeoutMs: 48000,
+        modelTier: "synthesis",
         purpose: "generate-flashcards"
       });
 
       const parsed = cleanAndParseJson(text, { flashcards: [] });
-      const rawList = Array.isArray(parsed.flashcards) 
-        ? parsed.flashcards 
+      const rawList = Array.isArray(parsed.flashcards)
+        ? parsed.flashcards
         : (Array.isArray(parsed.cards) ? parsed.cards : (Array.isArray(parsed) ? parsed : []));
 
       const flashcards = rawList
@@ -836,8 +825,7 @@ apiRouter.get("/health", (req, res) => {
         .filter(Boolean);
 
       const resultData = { flashcards };
-      
-      aiCache.set(cacheKey, { timestamp: Date.now(), data: resultData });
+      aiCache.set(cacheKey, resultData);
       res.json(resultData);
     } catch (error: any) {
       console.error("AI Flashcard Generation Error:", error);
@@ -848,39 +836,31 @@ apiRouter.get("/health", (req, res) => {
   apiRouter.post("/ai/grade-flashcard", async (req, res) => {
     try {
       const { question, correctAnswer, userAnswer } = req.body;
-      const cacheKey = getCacheKey("grade-flashcard", { question, correctAnswer, userAnswer });
-      
+      const cleanQuestion = compactText(question, 500);
+      const cleanCorrect = compactText(correctAnswer, 800);
+      const cleanUser = compactText(userAnswer, 800);
+
+      const cacheKey = getCacheKey("grade-flashcard", {
+        q: cleanQuestion,
+        a: cleanCorrect,
+        u: cleanUser.toLowerCase(),
+      });
+
       const cached = aiCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      if (cached) {
         console.log(`[Cache Hit] /api/ai/grade-flashcard`);
-        return res.json(cached.data);
+        return res.json(cached);
       }
-      
-      const systemInstruction = `
-      You are an objective SuperMemo-2 (SM-2) Conceptual Grading Engine.
-      Evaluate the user's answer based on SEMANTIC EQUIVALENCE to the correct answer, NOT literal verbatim matching.
 
-      SM-2 Quality Scale (0 to 5 integer):
-      - 5: Perfect conceptual recall; fully accurate and complete.
-      - 4: Correct and substantive recall, with minor non-critical omission.
-      - 3: Partially correct; grasped the core theme but missed an essential mechanism or element.
-      - 2: Incorrect, but showed tangential familiarity or partial recall of keywords.
-      - 1: Incorrect, completely failed to demonstrate understanding.
-      - 0: Completely blank, nonsensical, or irrelevant answer.
-
-      Feedback rules:
-      - 1-2 objective, respectful sentences in Indonesian explaining precisely what was accurate and what was missing.
-      - No sycophantic praise, no generic filler.
- 
-      Respond ONLY with a raw JSON object matching the schema:
-      {"isCorrect": true, "quality": 4, "feedback": "Penjelasan evaluasi objektif dalam Bahasa Indonesia."}
-      `;
+      const systemInstruction = `Penilai Semantik SuperMemo-2 (SM-2). Nilai kesetaraan makna (bukan kesamaan literal).
+Skala quality (0-5): 5=sempurna, 4=tepat kurang minor, 3=parsial paham inti, 2=salah tapi ada pengenalan istilah, 1=salah total, 0=kosong/tidak relevan.
+feedback: 1-2 kalimat objektif berbahasa Indonesia (tanpa basa-basi).`;
 
       const schema = {
         type: Type.OBJECT,
         properties: {
           isCorrect: { type: Type.BOOLEAN },
-          quality: { type: Type.NUMBER },
+          quality: { type: Type.INTEGER },
           feedback: { type: Type.STRING }
         },
         required: ["isCorrect", "quality", "feedback"]
@@ -888,29 +868,27 @@ apiRouter.get("/health", (req, res) => {
 
       const text = await executeAIRequest({
         systemInstruction,
-        userPrompt: `Question: ${question}\nCorrect Answer: ${correctAnswer}\nUser's Answer: ${userAnswer}`,
+        userPrompt: `Q: ${cleanQuestion}\nKunci: ${cleanCorrect}\nJawaban: ${cleanUser}`,
         jsonMode: true,
         responseSchema: schema,
-        temperature: 0.0,
-        maxTokens: 300,
+        modelTier: "lite",
         purpose: "grade-flashcard"
       });
 
       const parsed = cleanAndParseJson(text, { isCorrect: false, quality: 1, feedback: "Jawaban perlu diperdalam lagi." });
-      
-      let rawQuality = parsed.quality ?? parsed.score ?? parsed.rating ?? (parsed.isCorrect ? 4 : 1);
+
+      const rawQuality = parsed.quality ?? parsed.score ?? parsed.rating ?? (parsed.isCorrect ? 4 : 1);
       let quality = typeof rawQuality === 'number' ? Math.round(rawQuality) : parseInt(String(rawQuality), 10);
       if (isNaN(quality)) quality = (parsed.isCorrect || parsed.correct) ? 4 : 1;
       quality = Math.max(0, Math.min(5, quality));
 
-      const isCorrect = typeof parsed.isCorrect === 'boolean' 
-        ? parsed.isCorrect 
+      const isCorrect = typeof parsed.isCorrect === 'boolean'
+        ? parsed.isCorrect
         : (typeof parsed.correct === 'boolean' ? parsed.correct : quality >= 3);
       const feedback = String(parsed.feedback || parsed.explanation || parsed.ulasan || (isCorrect ? 'Jawaban Anda tepat.' : 'Jawaban belum tepat.')).trim();
 
       const resultData = { isCorrect, quality, feedback };
-      
-      aiCache.set(cacheKey, { timestamp: Date.now(), data: resultData });
+      aiCache.set(cacheKey, resultData);
       res.json(resultData);
     } catch (error: any) {
       console.error("AI Grading Error:", error);
@@ -921,97 +899,57 @@ apiRouter.get("/health", (req, res) => {
   apiRouter.post("/ai/generate-syllabus", async (req, res) => {
     try {
       const { topic } = req.body;
-      const cacheKey = getCacheKey("generate-syllabus", { topic });
-      
+      const cleanTopic = compactText(topic, 300);
+      if (!cleanTopic) {
+        return res.status(400).json({ error: "Topik kurikulum wajib diisi." });
+      }
+
+      const cacheKey = getCacheKey("generate-syllabus", { topic: cleanTopic.toLowerCase() });
+
       const cached = aiCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      if (cached) {
         console.log(`[Cache Hit] /api/ai/generate-syllabus`);
-        return res.json(cached.data);
+        return res.json(cached);
       }
-      
-      const systemInstruction = `
-      You are the Madrasah Modular Curriculum & Syllabus Engine.
-      Design a rigorous, structured learning path based on progressive Bloom's taxonomy (Foundational Knowledge -> Core Methodology -> Advanced Synthesis & Application).
 
-      Structural Requirements:
-      1. Title and concise description in Indonesian.
-      2. Exactly 3 sequential pedagogical phases:
-         - Phase 1: Fondasi Konseptual & Terminologi Inti
-         - Phase 2: Metode, Praktik, & Analisis Inti
-         - Phase 3: Implementasi Kritis & Sintesis Terapan
-      3. Each phase must contain 3 to 4 focused competencies. Keep each competency title and description concise (1 short sentence, max 15 words per description) to ensure complete, well-formed JSON output without token truncation.
- 
-      Provide all responses in Indonesian.
- 
-      Respond ONLY with a raw JSON object matching the schema:
-      {
-        "title": "Judul Jalur Belajar",
-        "description": "Deskripsi singkat tujuan kurikulum",
-        "phases": [
-          {
-            "title": "Fase 1: Judul",
-            "description": "Deskripsi singkat fase",
-            "order": 1,
-            "competencies": [
-              { "title": "Kompetensi 1", "description": "Deskripsi capaian terukur" }
-            ]
-          }
-        ]
-      }
-      `;
-
-      const schema = {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          description: { type: Type.STRING },
-          phases: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                description: { type: Type.STRING },
-                order: { type: Type.INTEGER },
-                competencies: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING }
-                    },
-                    required: ["title", "description"]
-                  }
-                }
-              },
-              required: ["title", "description", "order", "competencies"]
-            }
-          }
-        },
-        required: ["title", "description", "phases"]
-      };
+      const systemInstruction = `Perancang Kurikulum Madrasah (Taksonomi Bloom) berbahasa Indonesia.
+Kembalikan HANYA objek JSON valid berbentuk:
+{
+  "title": "Judul kurikulum singkat",
+  "description": "Deskripsi 1 kalimat",
+  "phases": [
+    {
+      "title": "Nama fase",
+      "description": "Ringkasan fase 1 kalimat",
+      "order": 1,
+      "competencies": [
+        { "title": "Nama kompetensi", "description": "Deskripsi padat maks 12 kata" }
+      ]
+    }
+  ]
+}
+Aturan:
+- Tepat 3 fase berurutan (1: Fondasi, 2: Metode & Praktik, 3: Sintesis Terapan).
+- Tiap fase berisi 3-4 kompetensi terukur dan ringkas.`;
 
       const text = await executeAIRequest({
         systemInstruction,
-        userPrompt: `Topic: ${topic}`,
+        userPrompt: `Topik: ${cleanTopic}`,
         jsonMode: true,
-        responseSchema: schema,
-        temperature: 0.25,
-        maxTokens: 3500,
-        timeoutMs: 48000,
+        timeoutMs: 45000,
+        modelTier: "synthesis",
         purpose: "generate-syllabus"
       });
 
-      const parsed = cleanAndParseJson(text, { title: topic, description: "Silabus pembelajaran komprehensif.", phases: [] });
-      
-      const rawPhases = Array.isArray(parsed.phases) 
-        ? parsed.phases 
+      const parsed = cleanAndParseJson(text, { title: cleanTopic, description: "Silabus pembelajaran komprehensif.", phases: [] });
+
+      const rawPhases = Array.isArray(parsed.phases)
+        ? parsed.phases
         : (Array.isArray(parsed.fase) ? parsed.fase : (Array.isArray(parsed.stages) ? parsed.stages : (Array.isArray(parsed.modules) ? parsed.modules : [])));
 
       const phases = rawPhases.map((p: any, idx: number) => {
-        const rawComps = Array.isArray(p.competencies) 
-          ? p.competencies 
+        const rawComps = Array.isArray(p.competencies)
+          ? p.competencies
           : (Array.isArray(p.kompetensi) ? p.kompetensi : (Array.isArray(p.tasks) ? p.tasks : (Array.isArray(p.steps) ? p.steps : (Array.isArray(p.items) ? p.items : []))));
 
         const competencies = rawComps.map((c: any, cIdx: number) => ({
@@ -1026,15 +964,19 @@ apiRouter.get("/health", (req, res) => {
           order: typeof p.order === 'number' ? p.order : idx + 1,
           competencies
         };
-      }).filter((p: any) => Boolean(p.title));
+      }).filter((p: any) => Boolean(p.title) && p.competencies.length > 0);
+
+      if (phases.length === 0) {
+        throw new Error("Format silabus dari AI tidak lengkap. Silakan coba lagi.");
+      }
 
       const resultData = {
-        title: String(parsed.title || parsed.name || topic).trim(),
-        description: String(parsed.description || parsed.deskripsi || `Panduan belajar untuk ${topic}`).trim(),
+        title: String(parsed.title || parsed.name || cleanTopic).trim(),
+        description: String(parsed.description || parsed.deskripsi || `Panduan belajar untuk ${cleanTopic}`).trim(),
         phases
       };
-      
-      aiCache.set(cacheKey, { timestamp: Date.now(), data: resultData });
+
+      aiCache.set(cacheKey, resultData);
       res.json(resultData);
     } catch (error: any) {
       console.error("AI Syllabus Generation Error:", error);
@@ -1045,34 +987,28 @@ apiRouter.get("/health", (req, res) => {
   apiRouter.post("/ai/summarize-literature", async (req, res) => {
     try {
       const { content } = req.body;
-      const cacheKey = getCacheKey("summarize-literature", { content });
-      
+      const sanitizedContent = headTailExcerpt(content, 4500);
+      if (!sanitizedContent) {
+        return res.status(400).json({ error: "Konten literatur tidak boleh kosong." });
+      }
+
+      const cacheKey = getCacheKey("summarize-literature", { content: sanitizedContent });
+
       const cached = aiCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      if (cached) {
         console.log(`[Cache Hit] /api/ai/summarize-literature`);
-        return res.json(cached.data);
+        return res.json(cached);
       }
-      
-      const systemInstruction = `
-      You are the Madrasah Academic Literature Analysis Engine.
-      Deconstruct academic or philosophical literature into the Three Pillars of Scholarly Review in Indonesian:
-      1. mainProblem (Masalah Utama): The central epistemic, theoretical, or empirical question addressed.
-      2. methodology (Metodologi / Alur Argumen): The analytical framework, conceptual apparatus, or line of reasoning employed.
-      3. conclusion (Kesimpulan & Implikasi): The core thesis, findings, or practical implications established.
- 
-      Respond ONLY with a raw JSON object matching this schema:
-      {
-        "mainProblem": "Penjelasan masalah utama...",
-        "methodology": "Penjelasan metodologi...",
-        "conclusion": "Penjelasan kesimpulan..."
-      }
-      `;
+
+      const systemInstruction = `Mesin Telaah Literatur Madrasah. Sarikan isi bacaan menjadi 3 pilar berbahasa Indonesia (2-3 kalimat padat per pilar) dalam JSON:
+1. mainProblem: masalah/pertanyaan sentral.
+2. methodology: kerangka/metode argumen.
+3. conclusion: tesis inti & implikasi.`;
 
       const schema = {
         type: Type.OBJECT,
         properties: {
           mainProblem: { type: Type.STRING },
-          problem: { type: Type.STRING },
           methodology: { type: Type.STRING },
           conclusion: { type: Type.STRING }
         },
@@ -1081,37 +1017,36 @@ apiRouter.get("/health", (req, res) => {
 
       const text = await executeAIRequest({
         systemInstruction,
-        userPrompt: `Literature Content:\n${content}`,
+        userPrompt: sanitizedContent,
         jsonMode: true,
         responseSchema: schema,
-        temperature: 0.15,
-        maxTokens: 800,
+        modelTier: "lite",
         purpose: "summarize-literature"
       });
 
       const parsed = cleanAndParseJson(text, {});
       const mainProblem = String(
-        parsed.mainProblem || 
-        parsed.problem || 
-        parsed.masalahUtama || 
-        parsed.masalah_utama || 
-        parsed.inti_masalah || 
+        parsed.mainProblem ||
+        parsed.problem ||
+        parsed.masalahUtama ||
+        parsed.masalah_utama ||
+        parsed.inti_masalah ||
         "Masalah utama belum diekstrak secara spesifik."
       ).trim();
 
       const methodology = String(
-        parsed.methodology || 
-        parsed.metodologi || 
-        parsed.metode || 
-        parsed.pendekatan || 
+        parsed.methodology ||
+        parsed.metodologi ||
+        parsed.metode ||
+        parsed.pendekatan ||
         "Metodologi pendekatan konseptual."
       ).trim();
 
       const conclusion = String(
-        parsed.conclusion || 
-        parsed.kesimpulan || 
-        parsed.takeaway || 
-        parsed.summary || 
+        parsed.conclusion ||
+        parsed.kesimpulan ||
+        parsed.takeaway ||
+        parsed.summary ||
         "Kesimpulan materi literatur."
       ).trim();
 
@@ -1121,8 +1056,8 @@ apiRouter.get("/health", (req, res) => {
         methodology,
         conclusion
       };
-      
-      aiCache.set(cacheKey, { timestamp: Date.now(), data: resultData });
+
+      aiCache.set(cacheKey, resultData);
       res.json(resultData);
     } catch (error: any) {
       console.error("AI Literature Summarizer Error:", error);
@@ -1130,40 +1065,25 @@ apiRouter.get("/health", (req, res) => {
     }
   });
 
-interface OpenLibraryBookResult {
+interface BookCandidate {
+  id: string;
+  title: string;
+  author?: string;
+  isbn?: string;
   totalPages: number;
   coverUrl: string;
+  publisher?: string;
+  publishedYear?: string;
+  source: "Open Library" | "Google Books" | "Penelusuran AI";
   isEstimated: boolean;
-  author?: string;
+  matchScore: number;
 }
 
-async function searchOpenLibraryDocs(query: string, timeoutMs = 7000): Promise<any[]> {
-  const queryUrl = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&fields=title,author_name,cover_i,isbn,number_of_pages_median,number_of_pages`;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(queryUrl, {
-      signal: controller.signal,
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "MadrasahPKOS/1.0 (https://madrasah.remix)"
-      }
-    });
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      console.warn(`[OpenLibrary] Search returned status ${res.status} for query "${query}"`);
-      return [];
-    }
-
-    const data = await res.json() as any;
-    return data?.docs || [];
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    console.warn(`[OpenLibrary] Search failed for query "${query}":`, err?.message || err);
-    return [];
-  }
+function normalizeIsbn(raw: unknown): string {
+  return String(raw || "")
+    .replace(/[^0-9Xx]/g, "")
+    .toUpperCase()
+    .slice(0, 13);
 }
 
 function normalizeForMatch(s: string): string {
@@ -1176,184 +1096,577 @@ function normalizeForMatch(s: string): string {
     .trim();
 }
 
-// Skor 0-1 seberapa mirip dua judul/nama, berbasis kemiripan kata (bukan exact match),
-// supaya "Filsafat Ilmu" tidak salah dicocokkan dengan "Filsafat Ilmu Pengetahuan Modern" karya lain.
-function textSimilarity(query: string, candidate: string): number {
-  const q = normalizeForMatch(query);
-  const c = normalizeForMatch(candidate);
+const DERIVATIVE_BOOK_TERMS = [
+  "summary",
+  "workbook",
+  "study guide",
+  "key takeaways",
+  "companion",
+  "analysis of",
+  "ringkasan",
+  "intisari",
+  "for teens",
+  "for kids",
+  "coloring book",
+  "trivia",
+];
+
+function computeTitleMatchScore(queryTitle: string, candidateTitle: string): number {
+  const q = normalizeForMatch(queryTitle);
+  const c = normalizeForMatch(candidateTitle);
   if (!q || !c) return 0;
   if (q === c) return 1;
-  const qWords = q.split(" ").filter(w => w.length > 1);
-  if (qWords.length === 0) return 0;
-  const cWords = new Set(c.split(" ").filter(w => w.length > 1));
+
+  // Subtitle match e.g. "Atomic Habits" vs "Atomic Habits: An Easy & Proven Way..."
+  const rawC = String(candidateTitle || "").toLowerCase().trim();
+  if (rawC.startsWith(`${q}:`) || rawC.startsWith(`${q} -`) || rawC.startsWith(`${q} (`)) {
+    return 0.92;
+  }
+
+  const qWords = q.split(" ").filter((w) => w.length > 1);
+  const cWords = c.split(" ").filter((w) => w.length > 1);
+  if (qWords.length === 0 || cWords.length === 0) {
+    return c.includes(q) ? 0.7 : 0;
+  }
+
+  const qSet = new Set(qWords);
+  const cSet = new Set(cWords);
   let overlap = 0;
-  for (const w of qWords) if (cWords.has(w)) overlap++;
-  const substringBonus = (c.includes(q) || q.includes(c)) ? 0.2 : 0;
-  return Math.min(1, overlap / qWords.length + substringBonus);
+  for (const w of qSet) {
+    if (cSet.has(w)) overlap++;
+  }
+
+  const queryCoverage = overlap / qSet.size;
+  const jaccard = overlap / (qSet.size + cSet.size - overlap);
+  let score = queryCoverage * 0.6 + jaccard * 0.4;
+
+  // Penalize derivative/abridged books unless the user explicitly searched for those terms
+  const hasDerivativePenalty = DERIVATIVE_BOOK_TERMS.some(
+    (term) => c.includes(term) && !q.includes(term)
+  );
+  if (hasDerivativePenalty) {
+    score -= 0.55;
+  }
+
+  return Math.max(0, Math.min(0.99, score));
 }
 
-async function fetchFromOpenLibrary(title: string, author?: string): Promise<OpenLibraryBookResult | null> {
-  const cleanTitle = String(title || "").trim();
-  const cleanAuthor = String(author || "").trim();
+function computeAuthorMatchScore(queryAuthor: string, candidateAuthors: string[]): number {
+  const q = normalizeForMatch(queryAuthor);
+  if (!q) return 0;
+  if (!candidateAuthors || candidateAuthors.length === 0) return -0.15;
 
-  if (!cleanTitle) return null;
+  const qWords = q.split(" ").filter((w) => w.length > 1);
+  let best = 0;
 
-  let bestCoverUrl = "";
-  let bestTotalPages = 0;
-  let bestAuthor = "";
-
-  const MATCH_THRESHOLD = 0.5;
-
-  const extractFromDocs = (docs: any[]) => {
-    let bestScore = 0;
-    let bestDoc: any = null;
-
-    for (let i = 0; i < Math.min(docs.length, 10); i++) {
-      const doc = docs[i];
-      if (!doc || !doc.title) continue;
-
-      let score = textSimilarity(cleanTitle, String(doc.title));
-      if (cleanAuthor && Array.isArray(doc.author_name)) {
-        const authorMatches = doc.author_name.some((a: string) => textSimilarity(cleanAuthor, String(a)) >= 0.5);
-        if (authorMatches) score += 0.3;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestDoc = doc;
-      }
+  for (const rawCandidate of candidateAuthors) {
+    const c = normalizeForMatch(rawCandidate);
+    if (!c) continue;
+    if (c === q) return 1;
+    if (c.includes(q) || q.includes(c)) {
+      best = Math.max(best, 0.9);
+      continue;
     }
-
-    // Hanya ambil data kalau ada satu dokumen yang cukup mirip — dan semua field
-    // (penulis, cover, halaman) diambil dari dokumen YANG SAMA, bukan dicampur.
-    if (!bestDoc || bestScore < MATCH_THRESHOLD) return;
-
-    if (!bestAuthor && Array.isArray(bestDoc.author_name) && bestDoc.author_name.length > 0 && bestDoc.author_name[0]) {
-      bestAuthor = String(bestDoc.author_name[0]).trim();
-    }
-
-    if (!bestCoverUrl) {
-      if (bestDoc.cover_i) {
-        bestCoverUrl = `https://covers.openlibrary.org/b/id/${bestDoc.cover_i}-L.jpg`;
-      } else if (Array.isArray(bestDoc.isbn) && bestDoc.isbn.length > 0 && bestDoc.isbn[0]) {
-        bestCoverUrl = `https://covers.openlibrary.org/b/isbn/${bestDoc.isbn[0]}-L.jpg`;
+    const cSet = new Set(c.split(" ").filter((w) => w.length > 1));
+    if (qWords.length > 0 && cSet.size > 0) {
+      let overlap = 0;
+      for (const w of qWords) {
+        if (cSet.has(w)) overlap++;
       }
+      best = Math.max(best, overlap / qWords.length);
     }
-
-    if (bestTotalPages === 0) {
-      const rawPages = bestDoc.number_of_pages_median ?? bestDoc.number_of_pages ?? 0;
-      if (typeof rawPages === "number") {
-        bestTotalPages = Math.max(0, Math.round(rawPages));
-      } else if (typeof rawPages === "string") {
-        bestTotalPages = Math.max(0, parseInt(rawPages, 10) || 0);
-      }
-    }
-  };
-
-  // Step A: Search with title + author if author is provided
-  if (cleanAuthor) {
-    const combinedDocs = await searchOpenLibraryDocs(`${cleanTitle} ${cleanAuthor}`);
-    extractFromDocs(combinedDocs);
   }
 
-  // Step B: If cover or pages not found yet, search with title alone
-  if (!bestCoverUrl || bestTotalPages === 0) {
-    const titleDocs = await searchOpenLibraryDocs(cleanTitle);
-    extractFromDocs(titleDocs);
-  }
-
-  if (bestCoverUrl || bestTotalPages > 0 || bestAuthor) {
-    return {
-      totalPages: bestTotalPages,
-      coverUrl: bestCoverUrl,
-      author: bestAuthor || undefined,
-      isEstimated: false
-    };
-  }
-
-  return null;
+  return best;
 }
 
-async function fetchFromGoogleBooks(title: string, author?: string): Promise<OpenLibraryBookResult | null> {
-  const cleanTitle = String(title || "").trim();
-  const cleanAuthor = String(author || "").trim();
+function pickPreferredIsbn(isbns: unknown[], queryIsbn: string): string {
+  if (!Array.isArray(isbns)) return "";
+  const cleaned = isbns
+    .map((x) => normalizeIsbn(x))
+    .filter((x) => x.length === 10 || x.length === 13);
+  if (cleaned.length === 0) return "";
+  if (queryIsbn && cleaned.includes(queryIsbn)) return queryIsbn;
+  return cleaned.find((x) => x.length === 13) || cleaned[0] || "";
+}
 
-  if (!cleanTitle) return null;
-
-  let query = cleanTitle;
-  if (cleanAuthor) {
-    query += `+inauthor:${cleanAuthor}`;
+function sanitizeCoverUrl(rawUrl: unknown): string {
+  if (typeof rawUrl !== "string") return "";
+  let url = rawUrl.trim();
+  if (!url) return "";
+  if (url.startsWith("http://")) {
+    url = "https://" + url.slice(7);
   }
+  if (!url.startsWith("https://")) return "";
+  url = url.replace("&edge=curl", "");
+  return url;
+}
 
-  const queryUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=5`;
+async function fetchOpenLibrarySearch(params: URLSearchParams, timeoutMs = 6500): Promise<any[]> {
+  params.set("fields", "key,title,author_name,cover_i,isbn,number_of_pages_median,number_of_pages,publisher,first_publish_year");
+  params.set("limit", "12");
+  const queryUrl = `https://openlibrary.org/search.json?${params.toString()}`;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 7000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(queryUrl, {
+      signal: controller.signal,
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "MadrasahPKOS/1.0 (https://madrasah.remix)"
+      }
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) return [];
+    const data = await res.json() as any;
+    return Array.isArray(data?.docs) ? data.docs : [];
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    console.warn(`[OpenLibrary] Search failed:`, err?.message || err);
+    return [];
+  }
+}
+
+async function fetchOpenLibraryJson(urlPath: string, timeoutMs = 4500): Promise<any | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://openlibrary.org${urlPath}`, {
+      signal: controller.signal,
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "MadrasahPKOS/1.0 (https://madrasah.remix)"
+      }
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    clearTimeout(timeoutId);
+    return null;
+  }
+}
+
+async function enrichOpenLibraryCandidate(
+  candidate: BookCandidate,
+  workKey: string,
+  queryIsbn: string
+): Promise<BookCandidate> {
+  if (candidate.totalPages > 0 && candidate.coverUrl) return candidate;
+
+  // Try direct ISBN edition first if available
+  const lookupIsbn = queryIsbn || candidate.isbn;
+  if (lookupIsbn) {
+    const ed = await fetchOpenLibraryJson(`/isbn/${encodeURIComponent(lookupIsbn)}.json`);
+    if (ed) {
+      const pages = typeof ed.number_of_pages === "number" && ed.number_of_pages > 0
+        ? Math.round(ed.number_of_pages)
+        : candidate.totalPages;
+      const coverId = Array.isArray(ed.covers) ? ed.covers.find((c: any) => typeof c === "number" && c > 0) : null;
+      const coverUrl = candidate.coverUrl || (coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg?default=false` : "");
+      return {
+        ...candidate,
+        totalPages: pages,
+        coverUrl,
+        publisher: candidate.publisher || (Array.isArray(ed.publishers) && ed.publishers[0] ? String(ed.publishers[0]) : undefined),
+        publishedYear: candidate.publishedYear || (String(ed.publish_date || "").match(/\d{4}/)?.[0] || undefined),
+      };
+    }
+  }
+
+  // Try work editions list to recover page count & cover
+  if (workKey && workKey.startsWith("/works/")) {
+    const edList = await fetchOpenLibraryJson(`${workKey}/editions.json?limit=6`);
+    const entries: any[] = Array.isArray(edList?.entries) ? edList.entries : [];
+    for (const entry of entries) {
+      const pages = typeof entry?.number_of_pages === "number" && entry.number_of_pages > 0
+        ? Math.round(entry.number_of_pages)
+        : 0;
+      const coverId = Array.isArray(entry?.covers) ? entry.covers.find((c: any) => typeof c === "number" && c > 0) : null;
+      const entryIsbn = pickPreferredIsbn([...(entry?.isbn_13 || []), ...(entry?.isbn_10 || [])], queryIsbn);
+      if (pages > 0 || coverId) {
+        return {
+          ...candidate,
+          totalPages: candidate.totalPages || pages,
+          coverUrl: candidate.coverUrl || (coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg?default=false` : ""),
+          isbn: candidate.isbn || (entryIsbn || undefined),
+          publisher: candidate.publisher || (Array.isArray(entry?.publishers) && entry.publishers[0] ? String(entry.publishers[0]) : undefined),
+          publishedYear: candidate.publishedYear || (String(entry?.publish_date || "").match(/\d{4}/)?.[0] || undefined),
+        };
+      }
+    }
+  }
+
+  return candidate;
+}
+
+async function fetchCandidatesFromOpenLibrary(
+  title: string,
+  author: string,
+  isbn: string
+): Promise<BookCandidate[]> {
+  let docs: any[] = [];
+
+  if (isbn) {
+    const p = new URLSearchParams({ isbn });
+    docs = await fetchOpenLibrarySearch(p);
+  }
+
+  if (docs.length === 0 && title) {
+    const p = new URLSearchParams({ title });
+    if (author) p.set("author", author);
+    docs = await fetchOpenLibrarySearch(p);
+  }
+
+  if (docs.length === 0 && title) {
+    const q = author ? `${title} ${author}` : title;
+    const p = new URLSearchParams({ q });
+    docs = await fetchOpenLibrarySearch(p);
+  }
+
+  const matched: Array<{ candidate: BookCandidate; workKey: string }> = [];
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    if (!doc?.title) continue;
+
+    const docIsbns = Array.isArray(doc.isbn) ? doc.isbn : [];
+    const preferredIsbn = pickPreferredIsbn(docIsbns, isbn);
+    const exactIsbnHit = Boolean(isbn && docIsbns.some((x: any) => normalizeIsbn(x) === isbn));
+
+    const titleScore = title ? computeTitleMatchScore(title, String(doc.title)) : 1;
+    const candidateAuthors: string[] = Array.isArray(doc.author_name)
+      ? doc.author_name.map((a: any) => String(a || "").trim()).filter(Boolean)
+      : [];
+    const authorScore = author ? computeAuthorMatchScore(author, candidateAuthors) : 0;
+
+    if (!exactIsbnHit) {
+      if (title && titleScore < 0.48) continue;
+      if (author && authorScore < 0.35) continue;
+    }
+
+    const rawPages = doc.number_of_pages_median ?? doc.number_of_pages ?? 0;
+    const totalPages = typeof rawPages === "number"
+      ? Math.max(0, Math.round(rawPages))
+      : Math.max(0, parseInt(String(rawPages), 10) || 0);
+
+    let coverUrl = "";
+    if (doc.cover_i) {
+      coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg?default=false`;
+    } else if (preferredIsbn) {
+      coverUrl = `https://covers.openlibrary.org/b/isbn/${preferredIsbn}-L.jpg?default=false`;
+    }
+
+    const completenessBonus = (totalPages > 0 ? 0.14 : 0) + (coverUrl ? 0.12 : 0);
+    const matchScore = (exactIsbnHit ? 2.0 : titleScore + authorScore * 0.45) + completenessBonus;
+
+    matched.push({
+      workKey: String(doc.key || ""),
+      candidate: {
+        id: `ol-${doc.key || preferredIsbn || i}`,
+        title: String(doc.title).trim(),
+        author: candidateAuthors[0] || undefined,
+        isbn: preferredIsbn || undefined,
+        totalPages,
+        coverUrl,
+        publisher: Array.isArray(doc.publisher) && doc.publisher[0] ? String(doc.publisher[0]).trim() : undefined,
+        publishedYear: doc.first_publish_year ? String(doc.first_publish_year) : undefined,
+        source: "Open Library",
+        isEstimated: false,
+        matchScore,
+      },
+    });
+  }
+
+  matched.sort((a, b) => b.candidate.matchScore - a.candidate.matchScore);
+  const topSubset = matched.slice(0, 5);
+  return Promise.all(
+    topSubset.map((entry, idx) =>
+      idx < 2 && entry.candidate.totalPages === 0
+        ? enrichOpenLibraryCandidate(entry.candidate, entry.workKey, isbn)
+        : Promise.resolve(entry.candidate)
+    )
+  );
+}
+
+async function fetchGoogleBooksRaw(rawQuery: string, timeoutMs = 6500): Promise<any[]> {
+  const queryUrl = `https://www.googleapis.com/books/v1/volumes?q=${rawQuery}&maxResults=10&printType=books`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(queryUrl, { signal: controller.signal });
     clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      console.warn(`[GoogleBooks] Search returned status ${res.status} for query "${query}"`);
-      return null;
-    }
-
+    if (!res.ok) return [];
     const data = await res.json() as any;
-    if (data.items && data.items.length > 0) {
-      let bestScore = 0;
-      let bestItem: any = null;
-
-      for (const item of data.items) {
-        const vol = item.volumeInfo;
-        if (!vol || !vol.title) continue;
-
-        let score = textSimilarity(cleanTitle, String(vol.title));
-        if (cleanAuthor && Array.isArray(vol.authors)) {
-          const authorMatches = vol.authors.some((a: string) => textSimilarity(cleanAuthor, String(a)) >= 0.5);
-          if (authorMatches) score += 0.3;
-        }
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestItem = item;
-        }
-      }
-
-      // Semua field diambil dari SATU buku yang paling mirip judulnya, bukan dicampur
-      // dari beberapa buku berbeda di hasil pencarian.
-      if (bestItem && bestScore >= 0.5) {
-        const vol = bestItem.volumeInfo;
-        const bestAuthor = (vol.authors && Array.isArray(vol.authors) && vol.authors.length > 0)
-          ? String(vol.authors[0]).trim() : "";
-        const bestTotalPages = (typeof vol.pageCount === "number" && vol.pageCount > 0)
-          ? Math.round(vol.pageCount) : 0;
-        let bestCoverUrl = "";
-        if (vol.imageLinks && vol.imageLinks.thumbnail) {
-          let thumb = String(vol.imageLinks.thumbnail).replace("http:", "https:");
-          thumb = thumb.replace("&edge=curl", "");
-          bestCoverUrl = thumb;
-        }
-
-        if (bestTotalPages > 0 || bestCoverUrl || bestAuthor) {
-          return {
-            totalPages: bestTotalPages,
-            coverUrl: bestCoverUrl,
-            author: bestAuthor || undefined,
-            isEstimated: false
-          };
-        }
-      }
-    }
+    return Array.isArray(data?.items) ? data.items : [];
   } catch (err: any) {
     clearTimeout(timeoutId);
-    console.warn(`[GoogleBooks] Search failed for query "${query}":`, err?.message || err);
+    console.warn(`[GoogleBooks] Search failed:`, err?.message || err);
+    return [];
+  }
+}
+
+async function fetchCandidatesFromGoogleBooks(
+  title: string,
+  author: string,
+  isbn: string
+): Promise<BookCandidate[]> {
+  let items: any[] = [];
+
+  if (isbn) {
+    items = await fetchGoogleBooksRaw(`isbn:${encodeURIComponent(isbn)}`);
   }
 
-  return null;
+  if (items.length === 0 && title) {
+    const parts: string[] = [`intitle:${encodeURIComponent(`"${title}"`)}`];
+    if (author) parts.push(`inauthor:${encodeURIComponent(`"${author}"`)}`);
+    items = await fetchGoogleBooksRaw(parts.join("+"));
+  }
+
+  if (items.length === 0 && title) {
+    const parts: string[] = [`intitle:${encodeURIComponent(title)}`];
+    if (author) parts.push(`inauthor:${encodeURIComponent(author)}`);
+    items = await fetchGoogleBooksRaw(parts.join("+"));
+  }
+
+  const results: BookCandidate[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const vol = item?.volumeInfo;
+    if (!vol?.title) continue;
+
+    const identifiers = Array.isArray(vol.industryIdentifiers)
+      ? vol.industryIdentifiers.map((idObj: any) => idObj?.identifier)
+      : [];
+    const preferredIsbn = pickPreferredIsbn(identifiers, isbn);
+    const exactIsbnHit = Boolean(isbn && identifiers.some((x: any) => normalizeIsbn(x) === isbn));
+
+    const titleScore = title ? computeTitleMatchScore(title, String(vol.title)) : 1;
+    const candidateAuthors: string[] = Array.isArray(vol.authors)
+      ? vol.authors.map((a: any) => String(a || "").trim()).filter(Boolean)
+      : [];
+    const authorScore = author ? computeAuthorMatchScore(author, candidateAuthors) : 0;
+
+    if (!exactIsbnHit) {
+      if (title && titleScore < 0.48) continue;
+      if (author && authorScore < 0.35) continue;
+    }
+
+    const totalPages = typeof vol.pageCount === "number" && vol.pageCount > 0
+      ? Math.round(vol.pageCount)
+      : 0;
+    const coverUrl = sanitizeCoverUrl(vol.imageLinks?.thumbnail || vol.imageLinks?.smallThumbnail || "");
+    const yearMatch = String(vol.publishedDate || "").match(/\d{4}/);
+    const completenessBonus = (totalPages > 0 ? 0.16 : 0) + (coverUrl ? 0.14 : 0);
+    const matchScore = (exactIsbnHit ? 2.05 : titleScore + authorScore * 0.45) + completenessBonus;
+
+    results.push({
+      id: `gb-${item.id || preferredIsbn || i}`,
+      title: String(vol.title).trim(),
+      author: candidateAuthors[0] || undefined,
+      isbn: preferredIsbn || undefined,
+      totalPages,
+      coverUrl,
+      publisher: vol.publisher ? String(vol.publisher).trim() : undefined,
+      publishedYear: yearMatch ? yearMatch[0] : undefined,
+      source: "Google Books",
+      isEstimated: false,
+      matchScore,
+    });
+  }
+
+  return results;
+}
+
+let groundingQuotaCooldownUntil = 0;
+
+function parseAiBookCandidates(
+  rawJsonText: string,
+  fallbackTitle: string,
+  fallbackAuthor: string,
+  fallbackIsbn: string
+): BookCandidate[] {
+  const parsed = cleanAndParseJson(rawJsonText, { candidates: [] });
+  const rawList = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
+  const candidates: BookCandidate[] = [];
+
+  for (let i = 0; i < rawList.length; i++) {
+    const c = rawList[i];
+    if (!c || typeof c !== "object") continue;
+    const cTitle = String(c.title || fallbackTitle || "").trim();
+    if (!cTitle) continue;
+
+    const cAuthor = typeof c.author === "string" ? c.author.trim() : "";
+    const cIsbn = normalizeIsbn(c.isbn);
+    const rawPages = c.totalPages ?? c.pageCount ?? 0;
+    const totalPages = typeof rawPages === "number"
+      ? Math.max(0, Math.round(rawPages))
+      : Math.max(0, parseInt(String(rawPages), 10) || 0);
+    const coverUrl = sanitizeCoverUrl(c.coverUrl);
+
+    if (fallbackAuthor && cAuthor && computeAuthorMatchScore(fallbackAuthor, [cAuthor]) < 0.35) {
+      continue;
+    }
+
+    candidates.push({
+      id: `ai-${i}-${cIsbn || Date.now()}`,
+      title: cTitle,
+      author: cAuthor || (fallbackAuthor || undefined),
+      isbn: cIsbn || (fallbackIsbn || undefined),
+      totalPages,
+      coverUrl,
+      publisher: typeof c.publisher === "string" ? c.publisher.trim() || undefined : undefined,
+      publishedYear: typeof c.publishedYear === "string" ? c.publishedYear.trim() || undefined : undefined,
+      source: "Penelusuran AI",
+      isEstimated: true,
+      matchScore: 0.75 + (totalPages > 0 ? 0.15 : 0),
+    });
+  }
+
+  return candidates.slice(0, 3);
+}
+
+async function fetchCandidatesViaGroundedAI(
+  title: string,
+  author: string,
+  isbn: string
+): Promise<BookCandidate[]> {
+  const gemini = getGeminiClient();
+  const queryParts = [
+    title ? `Judul: "${title}"` : "",
+    author ? `Penulis: "${author}"` : "",
+    isbn ? `ISBN: "${isbn}"` : "",
+  ].filter(Boolean).join("\n");
+
+  const prompt = `Cari informasi bibliografi resmi yang paling akurat dari buku berikut:
+${queryParts}
+
+Kembalikan HANYA JSON valid berbentuk:
+{
+  "candidates": [
+    {
+      "title": "Judul resmi buku",
+      "author": "Nama lengkap penulis",
+      "isbn": "ISBN-13 atau ISBN-10 jika ditemukan, atau kosong",
+      "totalPages": 0,
+      "publisher": "Nama penerbit jika diketahui",
+      "publishedYear": "YYYY jika diketahui",
+      "coverUrl": ""
+    }
+  ]
+}
+
+Aturan ketat:
+1. Prioritaskan edisi asli atau cetakan utama yang persis sesuai judul, penulis, dan ISBN dari pengguna. Jangan mengembalikan buku ringkasan/summary pihak ketiga kecuali memang diminta.
+2. totalPages harus berupa bilangan bulat halaman cetakan sebenarnya (isi 0 jika tidak diketahui pasti, jangan mengarang).
+3. coverUrl isi HANYA jika menemukan URL gambar sampul HTTPS langsung yang valid dari Open Library atau Google Books; jika ragu, isi "".
+4. Kembalikan maksimal 3 kandidat teratas yang paling relevan.`;
+
+  // 1. Try Google Search Grounding ONCE if not currently in quota cooldown
+  if (Date.now() >= groundingQuotaCooldownUntil) {
+    try {
+      const response = await gemini.models.generateContent({
+        model: GEMINI_SYNTHESIS_MODEL,
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          tools: [{ googleSearch: {} }],
+        },
+      });
+      const candidates = parseAiBookCandidates(response.text || "", title, author, isbn);
+      if (candidates.length > 0) {
+        console.log(`[Google Gemini] Grounded book-info served via ${GEMINI_SYNTHESIS_MODEL}`);
+        return candidates;
+      }
+    } catch (err: any) {
+      if (isAuthError(err)) {
+        throw new Error("Kunci API Google Gemini tidak valid atau ditolak. Periksa GEMINI_API_KEY di Settings > Secrets.");
+      }
+      if (isQuotaError(err)) {
+        // Search Grounding has strict free-tier limits; cool down and fall back to standard lite generateContent
+        groundingQuotaCooldownUntil = Date.now() + 10 * 60 * 1000;
+        console.info("[Google Gemini] Kuota Google Search Grounding tercapai, beralih ke mode bibliografi standar.");
+      } else {
+        console.info("[Google Gemini] Grounded book-info dilewati:", err?.message || err);
+      }
+    }
+  }
+
+  // 2. Fallback to standard lite generateContent (without googleSearch tool)
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      candidates: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            author: { type: Type.STRING },
+            isbn: { type: Type.STRING },
+            totalPages: { type: Type.INTEGER },
+            publisher: { type: Type.STRING },
+            publishedYear: { type: Type.STRING },
+            coverUrl: { type: Type.STRING },
+          },
+          required: ["title", "totalPages", "coverUrl"],
+        },
+      },
+    },
+    required: ["candidates"],
+  };
+
+  const text = await executeAIRequest({
+    systemInstruction: "Mesin Referensi Bibliografi Madrasah. Berikan data edisi buku terakurat sesuai input pengguna tanpa mengarang sampul.",
+    userPrompt: prompt,
+    jsonMode: true,
+    responseSchema: schema,
+    modelTier: "lite",
+    purpose: "book-info-fallback",
+  });
+
+  return parseAiBookCandidates(text, title, author, isbn);
+}
+
+function deduplicateAndRankCandidates(list: BookCandidate[]): BookCandidate[] {
+  const sorted = [...list].sort((a, b) => b.matchScore - a.matchScore);
+  const unique: BookCandidate[] = [];
+
+  for (const item of sorted) {
+    const normTitle = normalizeForMatch(item.title);
+    const normAuthor = normalizeForMatch(item.author || "");
+    const existingIdx = unique.findIndex((u) => {
+      if (item.isbn && u.isbn && item.isbn === u.isbn) return true;
+      return (
+        normalizeForMatch(u.title) === normTitle &&
+        normalizeForMatch(u.author || "") === normAuthor &&
+        u.totalPages === item.totalPages
+      );
+    });
+
+    if (existingIdx === -1) {
+      unique.push(item);
+    } else {
+      // Enrich missing cover/pages/isbn on the existing higher-ranked candidate if same edition
+      const current = unique[existingIdx];
+      unique[existingIdx] = {
+        ...current,
+        totalPages: current.totalPages || item.totalPages,
+        coverUrl: current.coverUrl || item.coverUrl,
+        isbn: current.isbn || item.isbn,
+        publisher: current.publisher || item.publisher,
+        publishedYear: current.publishedYear || item.publishedYear,
+      };
+    }
+
+    if (unique.length >= 5) break;
+  }
+
+  return unique;
 }
 
   apiRouter.post("/ai/book-info", async (req, res) => {
-    // Enable chunked streaming for real-time NDJSON logs
     res.setHeader("Content-Type", "application/x-ndjson");
     res.setHeader("Transfer-Encoding", "chunked");
     res.setHeader("Cache-Control", "no-cache");
@@ -1374,130 +1687,85 @@ async function fetchFromGoogleBooks(title: string, author?: string): Promise<Ope
     };
 
     try {
-      const { title, author } = req.body;
+      const { title, author, isbn, forceRefresh } = req.body;
       const cleanTitle = String(title || "").trim();
       const cleanAuthor = String(author || "").trim();
+      const cleanIsbn = normalizeIsbn(isbn);
 
-      if (!cleanTitle) {
-        return sendError("Judul buku wajib diisi");
+      if (!cleanTitle && !cleanIsbn) {
+        return sendError("Judul buku atau ISBN wajib diisi untuk pencarian metadata.");
       }
 
-      const cacheKey = getCacheKey("book-info", { title: cleanTitle, author: cleanAuthor });
-      
-      const cached = aiCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log(`[Cache Hit] /api/ai/book-info`);
-        sendLog("Menemukan data di dalam cache memori...");
-        return sendResult(cached.data);
-      }
+      const cacheKey = getCacheKey("book-info-v2", {
+        title: cleanTitle.toLowerCase(),
+        author: cleanAuthor.toLowerCase(),
+        isbn: cleanIsbn,
+      });
 
-      sendLog("Menghubungi server katalog Open Library...");
-      let openLibResult = await fetchFromOpenLibrary(cleanTitle, cleanAuthor);
-      
-      if (!openLibResult || !openLibResult.coverUrl || openLibResult.totalPages === 0 || !openLibResult.author) {
-        sendLog("Data Open Library belum lengkap. Beralih mencari via Google Books...");
-        const googleResult = await fetchFromGoogleBooks(cleanTitle, cleanAuthor);
-        if (googleResult) {
-          if (!openLibResult) openLibResult = googleResult;
-          else {
-            openLibResult.coverUrl = openLibResult.coverUrl || googleResult.coverUrl;
-            openLibResult.totalPages = openLibResult.totalPages || googleResult.totalPages;
-            openLibResult.author = openLibResult.author || googleResult.author;
-          }
+      if (!forceRefresh) {
+        const cached = aiCache.get(cacheKey);
+        if (cached) {
+          console.log(`[Cache Hit] /api/ai/book-info`);
+          sendLog("Memuat kandidat edisi dari cache...");
+          return sendResult(cached);
         }
       }
 
-      if (!openLibResult || openLibResult.totalPages === 0 || !openLibResult.author) {
-        sendLog("Data literatur masih rumpang. Memicu Mesin AI untuk estimasi & analisis...");
-        
-        const systemInstruction = `
-        You are the Madrasah Bibliographic Metadata Estimation Engine.
-        We need to complete the metadata for a published work titled "${cleanTitle}".
-        Provide an objective estimated page count, author name (if known), and optional cover URL for this published work.
-        
-        Requirements:
-        1. Provide a realistic estimated total page count based on typical published or academic editions.
-        2. Provide the author's full name if known.
-        3. If you know a valid Open Library ISBN or Cover ID, you may provide "https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg" or "https://covers.openlibrary.org/b/id/{cover_id}-L.jpg".
-        4. If no verified ISBN or Cover ID is known, return an empty string "" instead of guessing invalid URLs.
-        
-        Respond ONLY with a raw JSON object matching the schema:
-        {"totalPages": 320, "coverUrl": "", "author": "Author Name"}
-        `;
+      sendLog(
+        cleanIsbn
+          ? `Mencocokkan ISBN ${cleanIsbn} di Open Library dan Google Books...`
+          : "Mencari edisi presisi di katalog Open Library dan Google Books..."
+      );
 
-        const schema = {
-          type: Type.OBJECT,
-          properties: {
-            totalPages: { type: Type.INTEGER },
-            coverUrl: { type: Type.STRING },
-            author: { type: Type.STRING }
-          },
-          required: ["totalPages", "coverUrl"]
-        };
+      const [olCandidates, gbCandidates] = await Promise.all([
+        fetchCandidatesFromOpenLibrary(cleanTitle, cleanAuthor, cleanIsbn),
+        fetchCandidatesFromGoogleBooks(cleanTitle, cleanAuthor, cleanIsbn),
+      ]);
 
+      let mergedCandidates = deduplicateAndRankCandidates([...gbCandidates, ...olCandidates]);
+
+      const hasCompletePageCandidate = mergedCandidates.some((c) => c.totalPages > 0);
+      if (mergedCandidates.length === 0 || !hasCompletePageCandidate) {
+        sendLog("Katalog publik belum lengkap. Mencari pelengkap metadata via Google Gemini...");
         try {
-          const text = await executeAIRequest({
-            systemInstruction,
-            userPrompt: `Title: ${cleanTitle}\nAuthor: ${cleanAuthor || openLibResult?.author || "Unknown"}`,
-            jsonMode: true,
-            responseSchema: schema,
-            temperature: 0.0,
-            maxTokens: 250,
-            purpose: "book-info"
-          });
-
-          sendLog("Berhasil menganalisis respons AI. Menyusun ulang data hibrida...");
-          const parsed = cleanAndParseJson(text, { totalPages: 0, coverUrl: "", author: "" });
-          
-          let rawPages = parsed.totalPages ?? parsed.total_pages ?? parsed.pages ?? parsed.pageCount ?? 0;
-          let aiTotalPages = typeof rawPages === 'number' ? Math.round(rawPages) : parseInt(String(rawPages), 10) || 0;
-          if (aiTotalPages < 0) aiTotalPages = 0;
-
-          let aiCoverUrl = typeof parsed.coverUrl === 'string' 
-            ? parsed.coverUrl 
-            : (parsed.cover_url || parsed.cover || parsed.image_url || parsed.imageUrl || "");
-
-          if (typeof aiCoverUrl === 'string') {
-            aiCoverUrl = aiCoverUrl.trim();
-            if (!aiCoverUrl.startsWith("http://") && !aiCoverUrl.startsWith("https://")) {
-              aiCoverUrl = "";
-            }
-          } else {
-            aiCoverUrl = "";
-          }
-
-          let aiAuthor = typeof parsed.author === 'string' ? parsed.author.trim() : "";
-
-          if (!openLibResult) {
-            openLibResult = {
-              totalPages: aiTotalPages,
-              coverUrl: aiCoverUrl,
-              author: aiAuthor || undefined,
-              isEstimated: true
-            };
-          } else {
-            openLibResult.totalPages = openLibResult.totalPages || aiTotalPages;
-            openLibResult.coverUrl = openLibResult.coverUrl || aiCoverUrl;
-            openLibResult.author = openLibResult.author || aiAuthor;
-            openLibResult.isEstimated = true;
+          const aiCandidates = await fetchCandidatesViaGroundedAI(cleanTitle, cleanAuthor, cleanIsbn);
+          if (aiCandidates.length > 0) {
+            mergedCandidates = deduplicateAndRankCandidates([
+              ...mergedCandidates,
+              ...aiCandidates,
+            ]);
           }
         } catch (aiErr: any) {
-          console.warn("[AI Fallback] Failed but continuing with partial API data:", aiErr?.message || aiErr);
-          sendLog("Peringatan: Analisis AI terganggu. Melanjutkan dengan data yang ada...");
+          console.info("[Book-Info AI Fallback]", aiErr?.message || aiErr);
+          if (mergedCandidates.length === 0) {
+            return sendError(aiErr?.message || "Kuota Google Gemini sedang penuh atau pencarian metadata gagal.");
+          }
+          sendLog("Kuota AI sedang terbatas. Menampilkan kandidat dari katalog publik yang ditemukan...");
         }
       }
 
-      if (openLibResult) {
-        sendLog("Metadata berhasil dirangkai utuh.");
-        console.log(`[Final Result] Metadata assembled for "${cleanTitle}":`, openLibResult);
-        aiCache.set(cacheKey, { timestamp: Date.now(), data: openLibResult });
-        return sendResult(openLibResult);
+      const top = mergedCandidates[0];
+      const payload = {
+        candidates: mergedCandidates.slice(0, 5),
+        title: top?.title || cleanTitle,
+        author: top?.author || cleanAuthor || undefined,
+        isbn: top?.isbn || cleanIsbn || undefined,
+        totalPages: top?.totalPages || 0,
+        coverUrl: top?.coverUrl || "",
+        isEstimated: Boolean(top?.isEstimated),
+      };
+
+      if (mergedCandidates.length > 0) {
+        aiCache.set(cacheKey, payload);
+        sendLog(`Menemukan ${mergedCandidates.length} kandidat edisi yang cocok.`);
+      } else {
+        sendLog("Tidak ditemukan edisi yang cocok persis di katalog maupun web.");
       }
 
-      return sendError("Gagal menemukan informasi buku dari semua sumber.");
+      return sendResult(payload);
     } catch (error: any) {
       console.error("AI Book Info Error:", error);
-      return sendError(error.message || "Failed to fetch book info");
+      return sendError(error.message || "Gagal mengambil metadata buku");
     }
   });
 

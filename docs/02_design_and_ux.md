@@ -28,13 +28,17 @@ Fokus utama pengguna adalah membaca, merenung, menulis, dan melatih ingatan. Ole
 
 ## 2.2 Spesifikasi Design System
 
-| Kategori | Elemen Desain | Kelas Tailwind Terkait | Keterangan |
+| Kategori | Elemen Desain | Kelas / Komponen Terkait | Keterangan |
 | :--- | :--- | :--- | :--- |
 | **Tipografi** | Display (Judul Utama) | `font-display` (Plus Jakarta Sans) | Memberikan karakter modern, ramah, dan profesional pada setiap tajuk (`h1`, `h2`, `h3`, `DialogTitle`). |
 | | Body (Isi Teks) | `font-sans` (Inter) | Keterbacaan optimal di berbagai resolusi layar ponsel maupun monitor desktop. |
-| | Code / Meta | `font-mono` (JetBrains Mono) | Menampilkan metadata waktu, kode, angka, statistik, dan status teknis. |
+| | Code / Meta | `font-mono tabular-nums` (JetBrains Mono) | Menampilkan metadata waktu, angka, statistik, dan status teknis secara sejajar. |
 | **Lengkukan** | Kartu Utama / Dialog | `rounded-2xl` | Memberikan kesan modern dan ramah pada elemen kontainer berukuran besar. |
 | | Tombol / Input | `rounded-xl` | Standar konsisten untuk area interaktif berukuran kecil-menengah. |
+| **Primitif UI** | Header Halaman | `PageHeader` | Menyeragamkan judul, subjudul, dan slot aksi utama di seluruh halaman tingkat atas (`max-w-7xl`). |
+| | Metadata Tanpa Pill | `MetadataRow` | Menampilkan atribut teks bersih (`text-xs font-mono text-gray-500`) dengan pemisah titik tengah (`·`) tanpa kotak atau kapsul statis. |
+| | Keadaan Kosong | `EmptyState` | Wadah seragam dengan batas putus-putus, ikon monokrom `rounded-2xl`, serta ajakan aksi yang ringkas. |
+| | Konfirmasi Aksi | `ConfirmDialog` | Menggantikan seluruh `window.confirm` dan `window.alert` bawaan browser dengan modal monokrom `z-[100]`. |
 | **Warna** | Latar Belakang | `bg-gray-50/50` / `bg-white` | Bersih, sejuk, dan konsisten di seluruh modul. |
 | | Teks Utama | `text-gray-900` | Kontras tinggi (WCAG AA compliant) tanpa terlalu tajam di mata. |
 | | Teks Sekunder | `text-gray-500` | Digunakan untuk petunjuk input, metadata, atau teks pendukung. |
@@ -45,27 +49,27 @@ Fokus utama pengguna adalah membaca, merenung, menulis, dan melatih ingatan. Ole
 
 ## 2.3 Standar Lintas Perangkat (Mobile-First Mastery)
 
-Madrasah dirancang dengan pendekatan desktop-first untuk fungsionalitas kognitif berat, tetapi dioptimalkan secara penuh untuk akses mobile yang nyaman melalui panduan berikut:
+Madrasah dirancang dengan tata letak lega di desktop (`max-w-7xl` untuk ruang kerja utama dan `max-w-3xl`/`max-w-4xl` untuk halaman baca/editor) sekaligus dioptimalkan penuh untuk akses mobile melalui panduan berikut:
 
 ### 1. Aksesibilitas Sentuh (44px Minimum Touch Targets)
-Di perangkat mobile, seluruh tombol aksi primer, item tab navigasi, dan input teks wajib memiliki tinggi area sentuh minimal **44px** (`h-11 md:h-9` atau `h-11 sm:h-9`) untuk menjamin kenyamanan navigasi satu tangan dan mencegah terjadinya salah ketuk.
+Di perangkat mobile, seluruh tombol aksi primer (`Button`), kontrol segmen, item tab navigasi, tombol hapus/tutup, dan input teks wajib memiliki tinggi area sentuh minimal **44px** (`min-h-[44px] md:min-h-0` atau `h-11 md:h-9`). Aksi kartu yang tersembunyi saat *hover* di desktop tetap tampil jelas di layar sentuh (`opacity-100 md:opacity-0 md:group-hover:opacity-100`).
 
 ### 2. Bilah Tab Horisontal Anti-Overflow (Horizontal Scrollable Tabs)
-Pada seluruh modul dengan sub-kategori (seperti **Pustaka**, **Proyek**, **Catatan**, **Alur Menulis**, dan **Graf Pengetahuan**), tombol tab disusun dalam baris horisontal yang dapat digeser secara mulus dengan sentuhan jari menggunakan kelas `no-scrollbar` dan margin negatif responsif (`-mx-4 px-4 sm:mx-0 sm:px-0`). Tombol tab tidak pernah dipaksa melipat ke bawah (*wrap*) yang merusak tata letak.
+Pada seluruh modul dengan sub-kategori (seperti **Pustaka**, **Proyek**, **Catatan**, **Alur Menulis**, dan **Graf Pengetahuan**), tombol tab disusun dalam baris horisontal yang dapat digeser secara mulus dengan sentuhan jari menggunakan kelas `no-scrollbar` dan margin negatif responsif (`-mx-4 px-4 sm:mx-0 sm:px-0`).
 
 ### 3. Papan Kanban Snap-Scroll
-Pada tampilan Kanban di modul **Alur Menulis**, kolom status diletakkan dalam kontainer horisontal dengan dukungan penangkapan gulir (`snap-x snap-mandatory w-[82vw] sm:w-72`) agar pengguna ponsel dapat beralih antarkolom dengan usapan jari yang sangat alami.
+Pada tampilan Kanban di modul **Alur Menulis**, kolom status diletakkan dalam kontainer horisontal dengan dukungan penangkapan gulir (`snap-x snap-mandatory w-[82vw] sm:w-72`) agar pengguna ponsel dapat beralih antarkolom dengan usapan jari yang alami.
 
 ### 4. Penataan Layering (Z-Index Harmony)
 Untuk menjamin tidak adanya tumpang tindih visual yang merusak fungsionalitas:
 - **Mobile Nav**: Diberikan kelas `z-40` atau `z-50` menempel pada bagian bawah viewport.
-- **Dialog Modal / Popup**: Wajib diletakkan pada kelas **`z-[100]`** serta dilapisi efek blur redup (`backdrop-blur-[4px] bg-black/45`) di latar belakang untuk memisahkan fokus kognitif secara tegas dari bilah navigasi bawah.
+- **Dialog Modal / ConfirmDialog**: Wajib diletakkan pada kelas **`z-[100]`** serta dilapisi efek blur redup (`backdrop-blur-[4px] bg-black/45`) di latar belakang untuk memisahkan fokus kognitif secara tegas dari bilah navigasi bawah.
 
 ### 5. Penyaringan Pintar (Smart Accordion Drawer)
-Panel penyaringan data yang kompleks (seperti pada modul **Catatan**) secara dinamis berubah menjadi tombol lipat interaktif di layar mobile. Pengguna dapat membuka filter hanya saat membutuhkannya, memberikan ruang maksimal pada tabel catatan utama.
+Panel penyaringan data yang kompleks (seperti pada modul **Basis Pengetahuan / Catatan**) secara dinamis berubah menjadi tombol lipat interaktif di layar mobile. Pengguna dapat membuka filter hanya saat membutuhkannya, memberikan ruang maksimal pada daftar catatan utama.
 
 ### 6. Bottom Sheet Detail Simpul Graf
-Pada tampilan visualisasi Graf Pengetahuan di layar mobile, informasi detail mengenai simpul yang dipilih tidak diletakkan di sidebar samping kanan (seperti di desktop), melainkan meluncur mulus sebagai panel dari bawah layar (*bottom sheet*) untuk kegunaan satu tangan yang maksimal.
+Pada tampilan visualisasi Graf Pengetahuan di layar mobile, informasi detail mengenai simpul yang dipilih meluncur sebagai panel dari bawah layar (*bottom sheet*) dengan tombol tutup `min-h-[44px]` untuk kegunaan satu tangan yang maksimal.
 
 ---
 
@@ -78,11 +82,11 @@ Modal informasi sistem (**AboutDialog**) dirancang sebagai representasi visual m
 |                                                             |
 |                          [ 🧠 ]                             |
 |                         Madrasah                            |
-|                 PERSONAL KNOWLEDGE OS                       |
+|            SISTEM OPERASI PENGETAHUAN PRIBADI               |
 |                                                             |
 |          +-------------------+-------------------+          |
 |          |       Versi       |      Kreator      |          |
-|          |    v1.2.5-beta    |     egiistw88     |          |
+|          |      v1.2.5       |     Egi Setia     |          |
 |          +-------------------+-------------------+          |
 |                                                             |
 |          +---------------------------------------+          |
@@ -91,16 +95,16 @@ Modal informasi sistem (**AboutDialog**) dirancang sebagai representasi visual m
 |          |           🌐 HADITS RIWAYAT           |          |
 |          +---------------------------------------+          |
 |                                                             |
-|                         [Github] [Heart]                    |
-|             © 2026 Madrasah OS. All rights reserved.        |
+|        © 2026 Madrasah · Penyimpanan Lokal IndexedDB        |
 +-------------------------------------------------------------+
 ```
 
-- **Geometri Sudut (*Corner Radius*)**: Menggunakan kurvatur `rounded-[2rem]` untuk kontainer utama modal dan `rounded-[1.5rem]` untuk badge ikon otak, memberikan kelembutan optik yang presisi.
+- **Geometri Sudut (*Corner Radius*)**: Menggunakan `rounded-2xl` untuk kontainer modal dan badge ikon otak, selaras dengan sistem lengkungan Madrasah.
 - **Hierarki Informasi**:
-  1. **Badge Ikon Identitas**: Kontainer `w-20 h-20 bg-gray-900` dengan ikon `Brain` putih.
-  2. **Tipografi Judul**: `font-display font-bold text-xl` (Plus Jakarta Sans) dipadukan dengan label monospace `font-mono text-[11px] tracking-[0.2em]`.
-  3. **Grid Metadata**: Menampilkan Versi (`v1.2.5-beta`) dan Kreator (`egiistw88`) dalam pembagian kolom 2-jalur yang seimbang dengan garis pemisah tipis `border-y border-gray-50`.
-  4. **Kartu Kutipan (*Quote Card*)**: Kontainer `bg-gray-50/80 rounded-2xl` membingkai kalimat hikmah dengan tipografi serif italic `text-gray-700` dan atribusi riwayat.
-  5. **Tautan Komunitas & Copyright**: Ikon tautan GitHub, apresiasi komunitas, dan klausa hak cipta resmi `© 2026 Madrasah OS`.
+  1. **Badge Ikon Identitas**: Kontainer `w-16 h-16 bg-gray-900 rounded-2xl` dengan ikon `Brain` putih.
+  2. **Tipografi Judul**: `font-display font-bold text-xl` (Plus Jakarta Sans) dipadukan dengan label monospace `font-mono text-[11px] tracking-[0.18em]`.
+  3. **Grid Metadata**: Menampilkan Versi (`v1.2.5`) dan Kreator (`Egi Setia`) dalam pembagian kolom 2-jalur dengan garis pemisah `border-y border-gray-100`.
+  4. **Kartu Kutipan (*Quote Card*)**: Kontainer `bg-gray-50 rounded-2xl` membingkai kalimat hikmah dengan tipografi serif italic `text-gray-700` dan atribusi riwayat.
+  5. **Keterangan Penyimpanan**: Footer bersih `© {tahun} Madrasah · Penyimpanan Lokal IndexedDB` tanpa tautan placeholder mati.
+
 

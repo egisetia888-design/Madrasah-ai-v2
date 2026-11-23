@@ -7,11 +7,11 @@ Dokumen ini berisi informasi operasional teknis mengenai konfigurasi lingkungan,
 ## 6.1 Protokol Keamanan dan Optimasi Performa
 
 ### 1. Perlindungan Kredensial AI
-Seluruh interaksi kecerdasan buatan disalurkan melalui server backend Express (`server.ts`). Kunci rahasia API (`OPENROUTER_API_KEY`) hanya disimpan di memori server dan **tidak pernah** diekspos ke kode peramban klien. Skenario ini melindungi kuota penggunaan pengguna dari risiko pencurian kunci oleh pihak luar.
+Seluruh interaksi kecerdasan buatan disalurkan melalui server backend Express (`server.ts` / `server/app.ts`). Kunci rahasia API (`GEMINI_API_KEY`) hanya disimpan di memori server dan **tidak pernah** diekspos ke kode peramban klien. Skenario ini melindungi kuota penggunaan pengguna dari risiko pencurian kunci oleh pihak luar.
 
 ### 2. Efisiensi Penggunaan Memori & Penyimpanan
 - **Dynamic Vite Importing**: Pada server backend, modul pembangunan Vite hanya diimpor secara dinamis jika lingkungan sistem berada dalam mode pengembangan (`process.env.NODE_ENV !== "production"`). Hal ini memangkas penggunaan memori RAM server hingga 50% ketika aplikasi dijalankan di server produksi.
-- **Zustand LocalStorage Sync**: State frontend disinkronkan secara selektif ke penyimpanan lokal browser. Data yang sangat besar dipilah agar tidak melampaui batas kuota penyimpanan `localStorage` (maksimal 5MB di sebagian besar peramban).
+- **IndexedDB Multi-Store Registry**: State frontend disimpan secara terisolasi di 8 *object store* IndexedDB dalam `madrasah_db` (via `localforage`), melewati batas 5MB `localStorage`, dilengkapi ekspor/impor cadangan JSON terpadu serta dukungan *Persistent Storage* peramban.
 
 ---
 
@@ -21,13 +21,9 @@ Aplikasi membutuhkan file `.env` di direktori akar untuk beroperasi dengan fungs
 
 | Nama Variabel | Status | Nilai Default | Keterangan |
 | :--- | :--- | :--- | :--- |
-| `HCNSEC_API_KEY` | **Penyedia Utama (Tier 1)** | *Kosong* | Kunci autentikasi API provider mandiri HCNSEC. |
-| `HCNSEC_BASE_URL` | **Penyedia Utama (Tier 1)** | `https://api.hcnsec.cn/v1` | URL basis endpoint API provider HCNSEC (OpenAI-compatible). |
-| `HCNSEC_MODEL` | Opsional | `auto` | Daftar model prioritas HCNSEC, pisahkan dengan koma (contoh: `auto, Qwen3.8-27B, glm-5.3-flash`). Model rusak upstream (`DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `DeepSeek-V4.1-Flash`, `qwen3.8-max`, `kimi-k3`, `MiniMax-M3`) otomatis disaring; fallback bawaan: `Qwen3.8-27B`, `glm-5.3-flash`, `Qwen3.8-Flash-Next`, `auto`. Untuk `generate-syllabus`/`generate-flashcards`, `auto` selalu dicoba pertama. |
-| `OPENROUTER_API_KEY` | **Penyedia Sekunder (Tier 2)** | *Kosong* | Kredensial API OpenRouter untuk kestabilan multi-model mandiri. |
-| `OPENROUTER_MODEL` | Opsional | `deepseek/deepseek-chat` | Daftar model OpenRouter, pisahkan dengan koma. Model OpenRouter (didukung: `deepseek/deepseek-chat`, `qwen/qwen-2.5-72b-instruct`, dll). |
-| `GEMINI_API_KEY` | **Cadangan Terakhir (Tier 3)** | *Kosong* | Kredensial Google GenAI API resmi murni sebagai safety net jika Tier 1 & Tier 2 tidak dapat dihubungi. |
-| `APP_URL` | Opsional | `https://madrasah.remix` | Alamat URL aplikasi, dikirim sebagai header referer ke provider AI. |
+| `GEMINI_API_KEY` | **Penyedia Tunggal (Wajib untuk AI)** | *Kosong* | Kredensial resmi Google Gemini API untuk SDK `@google/genai`. |
+| `GEMINI_MODEL` | Opsional | *Hybrid Otomatis* | Override opsional nama model resmi (kosongkan agar server otomatis merutekan `gemini-3.1-flash-lite` dan `gemini-4-hydrogen`). |
+| `APP_URL` | Opsional | *Kosong* | Alamat URL publik aplikasi Anda. |
 | `NODE_ENV` | Otomatis | `development` | Mengontrol mode jalannya aplikasi (`development` atau `production`). |
 
 ---
@@ -54,7 +50,7 @@ Aplikasi membutuhkan file `.env` di direktori akar untuk beroperasi dengan fungs
    ```bash
    cp .env.example .env
    ```
-   Buka file `.env` menggunakan editor teks Anda dan masukkan kunci API HCNSEC atau provider pilihan Anda.
+   Buka file `.env` menggunakan editor teks Anda dan masukkan `GEMINI_API_KEY` Google Gemini Anda.
 
 4. **Jalankan Server Pengembangan**
    Mulai server terintegrasi lokal:
@@ -131,17 +127,8 @@ Proyek menggunakan arsitektur hibrida berkinerja tinggi:
 3. **Konfigurasi Environment Variables di Vercel**:
    Pada menu **Environment Variables**, tambahkan variabel kunci berikut (sesuai `.env.example`):
    - `GEMINI_API_KEY`: Kunci API Google Gemini untuk fungsionalitas AI.
-   - `GEMINI_MODEL`: `gemini-2.5-flash` (opsional).
-   - `OPENROUTER_API_KEY`: Kunci OpenRouter (opsional).
+   - `GEMINI_MODEL`: Opsional (kosongkan untuk routing hybrid otomatis).
    - `APP_URL`: URL domain Vercel Anda (misal: `https://madrasah-pwa.vercel.app`).
-   - *(Jika menggunakan sinkronisasi Firebase)*:
-     - `VITE_FIREBASE_API_KEY`
-     - `VITE_FIREBASE_AUTH_DOMAIN`
-     - `VITE_FIREBASE_PROJECT_ID`
-     - `VITE_FIREBASE_STORAGE_BUCKET`
-     - `VITE_FIREBASE_MESSAGING_SENDER_ID`
-     - `VITE_FIREBASE_APP_ID`
-     - `VITE_FIREBASE_FIRESTORE_DATABASE_ID`
 
 4. **Eksekusi Deploy**:
    - Klik tombol **Deploy**.

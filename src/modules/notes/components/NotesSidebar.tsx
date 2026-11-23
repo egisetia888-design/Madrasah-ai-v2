@@ -52,16 +52,17 @@ export function NotesSidebar({
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2">Kategori</h3>
           {[
             { id: 'all', label: 'Semua Catatan' },
-            { id: 'fleeting', label: 'Tangkapan Mentah (Fleeting)' },
-            { id: 'literature', label: 'Catatan Pustaka (Literature)' },
-            { id: 'permanent', label: 'Gagasan Permanen (Permanent)' }
+            { id: 'fleeting', label: 'Tangkapan Mentah' },
+            { id: 'literature', label: 'Catatan Pustaka' },
+            { id: 'permanent', label: 'Gagasan Permanen' }
           ].map(tab => (
             <button
+              type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
               className={cn(
-                "w-full text-left px-3 py-1.5 rounded-xl text-sm font-medium transition-colors cursor-pointer",
-                activeTab === tab.id ? "bg-gray-100 text-gray-900" : "text-gray-600 hover:bg-gray-50"
+                "w-full text-left px-3 py-2.5 sm:py-1.5 rounded-xl text-sm font-medium transition-colors cursor-pointer",
+                activeTab === tab.id ? "bg-gray-100 text-gray-900 font-semibold" : "text-gray-600 hover:bg-gray-50"
               )}
             >
               {tab.label}
@@ -70,43 +71,52 @@ export function NotesSidebar({
         </div>
 
         <div className="space-y-1 mb-6">
-          <div className="flex items-center justify-between px-2 mb-2">
+          <div className="flex items-center justify-between px-2 mb-1">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Folder</h3>
-            <button onClick={() => setIsAddFolderOpen(true)} className="text-gray-400 hover:text-gray-900 cursor-pointer">
+            <button
+              type="button"
+              onClick={() => setIsAddFolderOpen(true)}
+              className="text-gray-400 hover:text-gray-900 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center cursor-pointer"
+              title="Folder Baru"
+              aria-label="Buat folder baru"
+            >
               <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
           <button
+            type="button"
             onClick={() => setActiveFolderId(null)}
             className={cn(
-              "w-full flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors cursor-pointer",
-              activeFolderId === null ? "bg-gray-100 text-gray-900" : "text-gray-600 hover:bg-gray-50"
+              "w-full flex items-center gap-2 px-3 py-2.5 sm:py-1.5 rounded-xl text-sm font-medium transition-colors cursor-pointer",
+              activeFolderId === null ? "bg-gray-100 text-gray-900 font-semibold" : "text-gray-600 hover:bg-gray-50"
             )}
           >
-            <FolderOpen className="w-4 h-4" /> Semua Folder
+            <FolderOpen className="w-4 h-4 shrink-0" /> Semua Folder
           </button>
           {folders.map(folder => (
             <button
+              type="button"
               key={folder.id}
               onClick={() => setActiveFolderId(folder.id)}
               className={cn(
-                "w-full flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors cursor-pointer",
-                activeFolderId === folder.id ? "bg-gray-100 text-gray-900" : "text-gray-600 hover:bg-gray-50"
+                "w-full flex items-center gap-2 px-3 py-2.5 sm:py-1.5 rounded-xl text-sm font-medium transition-colors cursor-pointer",
+                activeFolderId === folder.id ? "bg-gray-100 text-gray-900 font-semibold" : "text-gray-600 hover:bg-gray-50"
               )}
             >
-              <FolderIcon className="w-4 h-4" /> {folder.name}
+              <FolderIcon className="w-4 h-4 shrink-0" /> <span className="truncate">{folder.name}</span>
             </button>
           ))}
         </div>
 
         {allTags.length > 0 && (
           <div className="space-y-1">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2">Tags</h3>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2">Label (Tag)</h3>
             <div className="flex flex-wrap gap-1.5 px-2">
               <button
+                type="button"
                 onClick={() => setActiveTagId(null)}
                 className={cn(
-                  "px-2 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer",
+                  "px-2.5 py-2 sm:py-1 rounded-xl text-xs font-medium border transition-colors cursor-pointer",
                   activeTagId === null ? "bg-gray-900 text-white border-gray-900" : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
                 )}
               >
@@ -114,10 +124,11 @@ export function NotesSidebar({
               </button>
               {allTags.map(tag => (
                 <button
+                  type="button"
                   key={tag.id}
                   onClick={() => setActiveTagId(tag.id)}
                   className={cn(
-                    "px-2 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer",
+                    "px-2.5 py-2 sm:py-1 rounded-xl text-xs font-medium border transition-colors cursor-pointer",
                     activeTagId === tag.id ? "bg-gray-900 text-white border-gray-900" : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
                   )}
                 >

@@ -18,6 +18,8 @@ import { useCurriculumStore } from '../../store/curriculumStore';
 import { useReviewStore } from '../../store/reviewStore';
 import { useWritingStore } from '../../store/writingStore';
 import { useProjectsStore } from '../../store/projectsStore';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { MetadataRow } from '../../components/ui/MetadataRow';
 
 export function AnalyticsPage() {
   const books = useLibraryStore(state => state.books);
@@ -29,17 +31,17 @@ export function AnalyticsPage() {
   const projects = useProjectsStore(state => state.projects);
 
   const notesDistribution = [
-    { name: 'Knowledge', value: notes.filter(n => n.type === 'knowledge').length },
-    { name: 'Project', value: notes.filter(n => n.type === 'project').length },
-    { name: 'Writing', value: notes.filter(n => n.type === 'writing').length },
-    { name: 'Personal', value: notes.filter(n => n.type === 'personal').length }
+    { name: 'Mentah', value: notes.filter(n => n.type === 'fleeting' || n.type === 'personal').length },
+    { name: 'Literatur', value: notes.filter(n => n.type === 'literature' || n.type === 'knowledge' || n.type === 'research').length },
+    { name: 'Permanen', value: notes.filter(n => n.type === 'permanent' || n.type === 'writing' || n.type === 'project').length },
   ].filter(d => d.value > 0);
 
   const statusDistribution = [
     { name: 'Membaca', value: books.filter(b => b.status === 'reading').length },
     { name: 'Selesai', value: books.filter(b => b.status === 'finished').length },
-    { name: 'Wishlist', value: books.filter(b => b.status === 'wishlist').length },
-    { name: 'Dimiliki', value: books.filter(b => b.status === 'owned').length }
+    { name: 'Daftar Ingin', value: books.filter(b => b.status === 'wishlist').length },
+    { name: 'Dimiliki', value: books.filter(b => b.status === 'owned').length },
+    { name: 'Dirangkum', value: books.filter(b => b.status === 'summarized').length },
   ].filter(d => d.value > 0);
   
   const COLORS = ['#111827', '#374151', '#4b5563', '#6b7280', '#9ca3af'];
@@ -102,18 +104,16 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-display font-bold tracking-tight text-gray-900">Analitik Ruang Kerja</h1>
-          <p className="text-gray-500 mt-1 text-sm md:text-base">Rekapitulasi interaksi, progres baca, dan produktivitas Anda.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Analitik Ruang Kerja"
+        description="Rekapitulasi interaksi, progres membaca, dan produktivitas belajar Anda."
+      />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
         {overviewStats.map((stat, idx) => (
           <div key={idx} className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col items-center justify-center text-center hover:border-gray-300 transition-colors">
             <stat.icon className="w-6 h-6 text-gray-400 mb-3" />
-            <span className="text-3xl font-bold font-mono text-gray-900">{stat.value}</span>
+            <span className="text-3xl font-bold font-mono tabular-nums text-gray-900">{stat.value}</span>
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider mt-2">{stat.label}</span>
           </div>
         ))}
@@ -121,7 +121,7 @@ export function AnalyticsPage() {
 
       {/* Reading Velocity Section */}
       <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-4">
           <div>
             <h3 className="text-base font-display font-bold text-gray-900 flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-gray-700" />
@@ -129,20 +129,13 @@ export function AnalyticsPage() {
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">Kecepatan dan konsistensi membaca harian berdasarkan riwayat sesi.</p>
           </div>
-          <div className="flex items-center gap-4 text-xs">
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-500">Total Dibaca:</span>
-              <span className="font-mono font-bold text-gray-900">{totalPagesRead} hal</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-500">Rata-rata:</span>
-              <span className="font-mono font-bold text-gray-900">{avgPagesLast7Days} hal/hari</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-500">Sesi:</span>
-              <span className="font-mono font-bold text-gray-900">{readingLogs.length} sesi</span>
-            </div>
-          </div>
+          <MetadataRow
+            items={[
+              <span>Total: <strong className="text-gray-900">{totalPagesRead} hal</strong></span>,
+              <span>Rata-rata: <strong className="text-gray-900">{avgPagesLast7Days} hal/hari</strong></span>,
+              <span>Sesi: <strong className="text-gray-900">{readingLogs.length}</strong></span>,
+            ]}
+          />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -169,17 +162,19 @@ export function AnalyticsPage() {
             {recentLogsWithBook.length > 0 ? (
               <div className="space-y-2.5">
                 {recentLogsWithBook.map(log => (
-                  <div key={log.id} className="p-2.5 rounded-xl bg-gray-50 border border-gray-100 text-xs">
+                  <div key={log.id} className="p-3 rounded-xl bg-gray-50 border border-gray-100 text-xs space-y-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium text-gray-900 truncate">{log.bookTitle}</span>
-                      <span className="font-mono bg-gray-900 text-white text-[10px] px-1.5 py-0.5 rounded shrink-0">
+                      <span className="font-mono tabular-nums font-semibold text-gray-900 shrink-0">
                         +{log.pagesRead} hal
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-[11px] text-gray-400 mt-1">
-                      <span>hal. {log.startPage} → {log.endPage}</span>
-                      <span>{new Date(log.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span>
-                    </div>
+                    <MetadataRow
+                      items={[
+                        `hal. ${log.startPage} → ${log.endPage}`,
+                        new Date(log.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
+                      ]}
+                    />
                   </div>
                 ))}
               </div>

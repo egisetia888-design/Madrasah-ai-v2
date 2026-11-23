@@ -9,7 +9,7 @@
 |                                                                         |
 |   +-----------------------+                    +--------------------+   |
 |   |     Zustand Store     | <----------------> |   React Frontend   |   |
-|   |  (Local + Cloud Sync) |                    |     (Vite SPA)     |   |
+|   |   (IndexedDB Lokal)   |                    |     (Vite SPA)     |   |
 |   +-----------------------+                    +--------------------+   |
 +---------------------------------------------------|---------------------+
                                                     |
@@ -27,26 +27,26 @@
                                                             |
                                                             | (HTTPS / REST)
                                                             v
-                                                  +-------------------+
-                                                  |  HCNSEC Provider  |
-                                                  | (AI Base Gateway) |
-                                                  +-------------------+
+                                                  +------------------------+
+                                                  |  Google Gemini API     |
+                                                  |  (@google/genai SDK)   |
+                                                  +------------------------+
 ```
 
 ### 1. Sisi Klien (Frontend Client)
 Aplikasi klien dibangun menggunakan **React 18+** dan dikompilasi menggunakan **Vite 6**. Seluruh pengelolaan status aplikasi (*global state*) dikonsolidasikan menggunakan **Zustand**. Keuntungan pola ini adalah:
 - **Keringanan & Kepatuhan**: Zustand tidak memerlukan pembungkus *Provider* berlebih, meminimalkan rendering ulang yang tidak perlu.
-- **Ketahanan Penyimpanan Offline (IndexedDB Engine)**: Data disimpan di peramban menggunakan IndexedDB (didukung `localforage` dengan isolasi per-store) untuk melewati batas 5MB `localStorage`, dengan migrasi otomatis data lawas dan fallback yang aman.
-- **Dual Persistence Strategy**: Data lokal disinkronkan secara mulus ke cloud Firestore dengan Optimistic Concurrency Control (OCC) untuk keamanan jangka panjang.
+- **Ketahanan Penyimpanan Luring (IndexedDB Multi-Store Registry)**: Data disimpan secara lokal di peramban menggunakan IndexedDB (didukung `localforage` dengan 8 *object store* terisolasi dalam database `madrasah_db`), lengkap dengan registri terpusat untuk diagnostik kuota, proteksi *Persistent Storage*, dan ekspor/impor cadangan JSON terpadu (v2 + fallback v1).
+- **Zero-Config Workspace**: Aplikasi langsung siap digunakan melalui layar sambutan lokal instan tanpa memerlukan akun cloud maupun kunci API Firebase.
 - **Ergonomi Sentuh & Responsivitas**: Dilengkapi dengan hook penanganan gesture sentuh dan bilah tab gulir bebas hambatan (`no-scrollbar`).
 - **Ketahanan Fatal & Notifikasi (Resilience & Toast)**: Dilengkapi dengan `ErrorBoundary` level akar dan pencegat kejadian *runtime* global via pustaka *toast* `sonner` untuk menampilkan jejak *error* transparan kepada pengguna tanpa memecah konsol peramban secara sunyi.
 
 ### 2. Sisi Server (Backend Gateway)
 Server backend menggunakan **Express.js** yang berjalan di Node.js. Server ini memiliki tanggung jawab krusial:
-- **Keamanan Kredensial AI**: Menjaga rahasia `HCNSEC_API_KEY`, `OPENROUTER_API_KEY`, dan `GEMINI_API_KEY` dari jangkauan peramban. Aplikasi klien hanya memanggil rute `/api/ai/*`.
-- **HCNSEC AI Provider Gateway**: Mengutamakan provider **HCNSEC** (`HCNSEC_API_KEY`, `HCNSEC_BASE_URL`, `HCNSEC_MODEL`) yang kompatibel dengan protokol OpenAI Chat Completions, dengan mekanisme fallback yang anggun.
+- **Keamanan Kredensial AI**: Menjaga rahasia `GEMINI_API_KEY` dari jangkauan peramban. Aplikasi klien hanya memanggil rute `/api/ai/*`.
+- **Google Gemini Hybrid Engine**: Mengarahkan beban ringan ke `gemini-3.1-flash-lite` (`ThinkingLevel.MINIMAL`) dan tugas sintesis/kurikulum ke `gemini-4-hydrogen` (`ThinkingLevel.LOW`) untuk memaksimalkan kuota harian.
 - **Rate Limiting**: Melindungi server dari lonjakan trafik dan penyalahgunaan kuota menggunakan `express-rate-limit`.
-- **In-Memory Cache (TTL 1 Jam)**: Menyimpan respons AI berdasarkan hash payload permintaan untuk memotong latensi dan biaya API.
+- **Bounded LRU Cache (TTL 2 Jam, Maks 500 Entri)**: Menyimpan respons AI berdasarkan hash SHA-256 payload yang telah dinormalisasi untuk memotong latensi dan konsumsi token.
 - **Robust JSON Sanitizer**: Membersihkan blok kode Markdown dan memulihkan objek JSON secara otomatis melalui fungsi `cleanAndParseJson`.
 
 ---
@@ -57,7 +57,7 @@ Struktur direktori Madrasah diorganisasikan secara modular untuk memastikan skal
 
 ```
 /remix-madrasah
-├── .env.example              # Template konfigurasi variabel lingkungan lengkap (Gemini, OpenRouter, Firebase)
+├── .env.example              # Template konfigurasi variabel lingkungan (Google Gemini & APP_URL)
 ├── AGENTS.md                 # Aturan baku dan batasan AI Coding Agent
 ├── README.md                 # Gerbang utama dan panduan cepat proyek
 ├── vercel.json               # Konfigurasi deployment Vercel (rewrites, functions, caching)
@@ -92,16 +92,17 @@ Struktur direktori Madrasah diorganisasikan secara modular untuk memastikan skal
     │   ├── layout/           # MainLayout, Sidebar, MobileNav, CommandPalette, OnboardingTour
     │   └── ui/               # Komponen atomik (Button, Dialog, Badge, Card, dll.)
     ├── store/                # Zustand stores untuk manajemen state modular
-    │   ├── authStore.ts      # Autentikasi dan profil pengguna
+    │   ├── authStore.ts      # Sesi dan nama ruang kerja lokal
     │   ├── curriculumStore.ts# Kurikulum dan fase belajar
     │   ├── graphStore.ts     # Konfigurasi simpul dan filter graf
-    │   ├── indexedDbStorage.ts # Wrapper IndexedDB terisolasi (localforage)
+    │   ├── indexedDbStorage.ts # Mesin & registri IndexedDB terpadu (backup JSON v2 & diagnostik)
     │   ├── knowledgeStore.ts # Konsep atomik dan hubungan semantik
     │   ├── libraryStore.ts   # Pustaka buku, penulis, dan riwayat sesi baca
     │   ├── notesStore.ts     # Zettelkasten notes dan inbox
     │   ├── projectsStore.ts  # Proyek dan daftar tugas terstruktur
     │   ├── reviewStore.ts    # Dek flashcard dan algoritma SM-2
-    │   ├── syncUtils.ts      # Utilitas sinkronisasi Firestore
+    │   ├── syncStateStore.ts # Pelacak status penyimpanan lokal & waktu simpan terakhir
+    │   ├── syncUtils.ts      # Utilitas metadata revisi lokal
     │   ├── toastStore.ts     # Notifikasi toast global
     │   ├── tourStore.ts      # Panduan interaktif onboarding
     │   ├── uiStore.ts        # Status visual dan visibilitas sidebar
@@ -110,7 +111,7 @@ Struktur direktori Madrasah diorganisasikan secara modular untuk memastikan skal
     ├── utils/                # Fungsi utilitas pembantu umum (cn.ts, date.ts)
     └── modules/              # Modul fungsional independen
         ├── analytics/        # Laporan visual metrik kognitif & produktivitas
-        ├── auth/             # Autentikasi dan login modal
+        ├── auth/             # Layar selamat datang ruang kerja lokal & pemulihan cepat JSON
         ├── concepts/         # Unit pengetahuan abstrak & evolusi konsep
         ├── curriculum/       # Peta jalan belajar & AI Syllabus Planner
         ├── dashboard/        # Beranda (Mission Control) & Jam Hijriah
@@ -136,10 +137,10 @@ Struktur direktori Madrasah diorganisasikan secara modular untuk memastikan skal
 | **Bahasa Pemrograman**| TypeScript 5 | Membantu deteksi kesalahan ketik pada struktur data rumit sebelum kode didorong ke produksi. |
 | **Gaya Visual** | Tailwind CSS v4 | Optimasi CSS modern, ukuran berkas akhir sangat ringan, dan memangkas kebutuhan file CSS terpisah. |
 | **Animasi** | Motion (`motion/react`) | Standar industri untuk transisi mikro yang halus, teruji, dan ramah performa peramban. |
-| **Manajemen Status** | Zustand | Sangat ringan, tanpa boilerplate berlebih, dan terintegrasi dengan `localStorage` serta Firestore. |
+| **Manajemen Status** | Zustand | Sangat ringan, tanpa boilerplate berlebih, dan terintegrasi dengan registri multi-store **IndexedDB** (`localforage`). |
 | **Visualisasi Data** | D3.js & Recharts | D3.js untuk fleksibilitas mutlak merancang Graf Pengetahuan interaktif; Recharts untuk grafik performa yang bersih. |
 | **Server Samping** | Express.js & Tsx | Sangat cepat melayani rute API, mudah dihubungkan dengan middleware, serta kompatibel dengan ekosistem container. |
-| **AI Gateway** | HCNSEC / Custom Provider | Mendukung endpoint AI OpenAI-compatible kustom dengan performa andal dan biaya optimal. |
+| **AI Gateway** | Google GenAI SDK (`@google/genai`) | Arsitektur hybrid `gemini-3.1-flash-lite` + `gemini-4-hydrogen` (`ThinkingLevel.LOW`) yang hemat token. |
 
 ---
 

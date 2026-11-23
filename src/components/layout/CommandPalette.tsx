@@ -63,8 +63,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
 
   // Actions
   const globalActions = [
-    { id: 'nav-graph', title: 'Buka Knowledge Graph', type: 'Navigasi', icon: Network, action: () => handleSelect('/graph') },
-    { id: 'nav-review', title: 'Mulai Sesi Review', type: 'Navigasi', icon: Brain, action: () => handleSelect('/review') },
+    { id: 'nav-graph', title: 'Buka Graf Pengetahuan', type: 'Navigasi', icon: Network, action: () => handleSelect('/graph') },
+    { id: 'nav-review', title: 'Mulai Sesi Ulasan', type: 'Navigasi', icon: Brain, action: () => handleSelect('/review') },
   ];
 
   const searchResults = () => {

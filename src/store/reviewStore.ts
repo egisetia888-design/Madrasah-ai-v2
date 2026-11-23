@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Deck, Flashcard } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
-import { syncSaveDeck, syncDeleteDeck, syncSaveFlashcard, syncDeleteFlashcard } from '../lib/firestoreSync';
 import { SyncMetadata } from '../types';
 import { createIndexedDbStorage } from './indexedDbStorage';
 
@@ -37,7 +36,6 @@ export const useReviewStore = create<ReviewState>()(
             ...state.decks
           ]
         }));
-        syncSaveDeck(newDeck);
         return id;
       },
       
@@ -46,7 +44,6 @@ export const useReviewStore = create<ReviewState>()(
           decks: state.decks.filter(d => d.id !== id),
           flashcards: state.flashcards.filter(f => f.deckId !== id),
         }));
-        syncDeleteDeck(id);
       },
 
       addFlashcard: (flashcardData) => {
@@ -66,7 +63,6 @@ export const useReviewStore = create<ReviewState>()(
             newFlashcard
           ]
         }));
-        syncSaveFlashcard(newFlashcard);
       },
       
       reviewFlashcard: (id, quality) => set((state) => {
@@ -91,7 +87,7 @@ export const useReviewStore = create<ReviewState>()(
           
           const dueDate = Date.now() + interval * 24 * 60 * 60 * 1000;
           
-          const updatedCard = {
+          return {
             ...f,
             efactor,
             repetition,
@@ -99,8 +95,6 @@ export const useReviewStore = create<ReviewState>()(
             dueDate,
             ...updateSyncMetadata(f),
           };
-          syncSaveFlashcard(updatedCard);
-          return updatedCard;
         });
         return { flashcards: updatedFlashcards };
       }),

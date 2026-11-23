@@ -3,7 +3,6 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { Project, Task, TaskStatus } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
 import { SyncMetadata } from '../types';
-import { syncSaveProject, syncDeleteProject } from '../lib/firestoreSync';
 import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface ProjectsState {
@@ -38,22 +37,15 @@ export const useProjectsStore = create<ProjectsState>()(
         set((state) => ({
           projects: [newProject, ...state.projects]
         }));
-        syncSaveProject(newProject);
         return id;
       },
       
       updateProject: (id, projectData) => {
-        set((state) => {
-          const updatedProjects = state.projects.map(p => {
-            if (p.id === id) {
-              const updated = { ...p, ...projectData, ...updateSyncMetadata(p) };
-              syncSaveProject(updated);
-              return updated;
-            }
-            return p;
-          });
-          return { projects: updatedProjects };
-        });
+        set((state) => ({
+          projects: state.projects.map(p =>
+            p.id === id ? { ...p, ...projectData, ...updateSyncMetadata(p) } : p
+          )
+        }));
       },
       
       deleteProject: (id) => {
@@ -61,7 +53,6 @@ export const useProjectsStore = create<ProjectsState>()(
           projects: state.projects.filter(p => p.id !== id),
           tasks: state.tasks.filter(t => t.projectId !== id),
         }));
-        syncDeleteProject(id);
       },
 
       addTask: (taskData) => set((state) => {

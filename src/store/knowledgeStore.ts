@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Concept, SourceFragment, Relation } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
-import { syncSaveConcept, syncDeleteConcept, syncSaveSourceFragment, syncDeleteSourceFragment, syncSaveRelation, syncDeleteRelation } from '../lib/firestoreSync';
 import { SyncMetadata } from '../types';
 import { createIndexedDbStorage } from './indexedDbStorage';
 
@@ -48,29 +47,18 @@ export const useKnowledgeStore = create<KnowledgeState>()(
             }
           ]
         }));
-
-        const state = get();
-        const concept = state.concepts.find(c => c.id === newId);
-        if (concept) syncSaveConcept(concept);
         return newId;
       },
-      updateConcept: (id, data) => set((state) => {
-        const updatedConcepts = state.concepts.map((c) => {
-          if (c.id === id) {
-            const updated = { ...c, ...data, ...updateSyncMetadata(c) };
-            syncSaveConcept(updated);
-            return updated;
-          }
-          return c;
-        });
-        return { concepts: updatedConcepts };
-      }),
+      updateConcept: (id, data) => set((state) => ({
+        concepts: state.concepts.map((c) =>
+          c.id === id ? { ...c, ...data, ...updateSyncMetadata(c) } : c
+        )
+      })),
       deleteConcept: (id) => {
         set((state) => ({
           concepts: state.concepts.filter((c) => c.id !== id),
           relations: state.relations.filter((r) => r.sourceNodeId !== id && r.targetNodeId !== id)
         }));
-        syncDeleteConcept(id);
       },
 
       // SourceFragment Actions
@@ -87,29 +75,18 @@ export const useKnowledgeStore = create<KnowledgeState>()(
             }
           ]
         }));
-
-        const state = get();
-        const fragment = state.sourceFragments.find(f => f.id === newId);
-        if (fragment) syncSaveSourceFragment(fragment);
         return newId;
       },
-      updateSourceFragment: (id, data) => set((state) => {
-        const updatedFragments = state.sourceFragments.map((f) => {
-          if (f.id === id) {
-            const updated = { ...f, ...data, ...updateSyncMetadata(f) };
-            syncSaveSourceFragment(updated);
-            return updated;
-          }
-          return f;
-        });
-        return { sourceFragments: updatedFragments };
-      }),
+      updateSourceFragment: (id, data) => set((state) => ({
+        sourceFragments: state.sourceFragments.map((f) =>
+          f.id === id ? { ...f, ...data, ...updateSyncMetadata(f) } : f
+        )
+      })),
       deleteSourceFragment: (id) => {
         set((state) => ({
           sourceFragments: state.sourceFragments.filter((f) => f.id !== id),
           relations: state.relations.filter((r) => r.sourceNodeId !== id && r.targetNodeId !== id)
         }));
-        syncDeleteSourceFragment(id);
       },
 
       // Relation Actions
@@ -126,28 +103,17 @@ export const useKnowledgeStore = create<KnowledgeState>()(
             }
           ]
         }));
-
-        const state = get();
-        const relation = state.relations.find(r => r.id === newId);
-        if (relation) syncSaveRelation(relation);
         return newId;
       },
-      updateRelation: (id, data) => set((state) => {
-        const updatedRelations = state.relations.map((r) => {
-          if (r.id === id) {
-            const updated = { ...r, ...data, ...updateSyncMetadata(r) };
-            syncSaveRelation(updated);
-            return updated;
-          }
-          return r;
-        });
-        return { relations: updatedRelations };
-      }),
+      updateRelation: (id, data) => set((state) => ({
+        relations: state.relations.map((r) =>
+          r.id === id ? { ...r, ...data, ...updateSyncMetadata(r) } : r
+        )
+      })),
       deleteRelation: (id) => {
         set((state) => ({
           relations: state.relations.filter((r) => r.id !== id)
         }));
-        syncDeleteRelation(id);
       },
     }),
     {

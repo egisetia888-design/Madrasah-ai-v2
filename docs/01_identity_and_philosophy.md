@@ -13,7 +13,7 @@
 | **Identitas Visual**| Ikon Otak (*Brain*) | Simbol Otak Kedua, kognisi mandiri, dan kristalisasi ilmu |
 | **Hak Cipta** | © 2026 Madrasah OS | Hak cipta terpelihara |
 | **Palet Visual** | Monokrom Minimalis (Maks. 3 Warna) | Putih Murni, Slate Grays, Hitam Arang |
-| **Gateway AI Utama**| **HCNSEC Provider Gateway** | Kompatibel dengan protokol OpenAI Chat Completions |
+| **Gateway AI Utama**| **Google Gemini (`@google/genai`)** | Arsitektur hybrid hemat token (`gemini-3.1-flash-lite` & `gemini-4-hydrogen`) |
 
 ---
 

@@ -6,17 +6,16 @@ Seluruh struktur data di dalam **Madrasah — Personal Knowledge Operating Syste
 
 ## 5.1 Spesifikasi Model Data (TypeScript Schemas)
 
-Semua entitas data dideklarasikan di `src/types/index.ts` untuk menjamin konsistensi di seluruh modul frontend. Setiap entitas mengadopsi metadata sinkronisasi (`SyncMetadata`) untuk mendukung ketahanan data lokal dan cloud:
+Semua entitas data dideklarasikan di `src/types/index.ts` untuk menjamin konsistensi di seluruh modul frontend. Setiap entitas mengadopsi metadata revisi lokal (`SyncMetadata`) untuk pelacakan pembaruan di IndexedDB:
 
 ```typescript
 export type UUID = string;
-export type SyncStatus = 'local_only' | 'pending_sync' | 'syncing' | 'synced' | 'conflict' | 'failed';
+export type SyncStatus = 'local_only' | 'saved';
 
 export interface SyncMetadata {
   revision: number;
   updatedAt: number;
   syncStatus: SyncStatus;
-  conflict?: ConflictData;
 }
 ```
 
@@ -35,12 +34,27 @@ export interface Book extends SyncMetadata {
   title: string;
   authorId: UUID | null;
   categoryId: UUID | null;
+  isbn?: string;
   status: BookStatus;
   progress: number;
   totalPages?: number;
   coverImage?: string;
   isEstimatedPages?: boolean;
   createdAt: number;
+}
+
+export interface BookCandidate {
+  id: string;
+  title: string;
+  author?: string;
+  isbn?: string;
+  totalPages: number;
+  coverUrl: string;
+  publisher?: string;
+  publishedYear?: string;
+  source: 'Open Library' | 'Google Books' | 'Penelusuran AI';
+  isEstimated: boolean;
+  matchScore?: number;
 }
 
 export interface ReadingLog extends SyncMetadata {
@@ -228,7 +242,7 @@ Server backend (`server.ts`) mengekspos 7 endpoint fungsional khusus untuk mempr
 | `/api/ai/grade-flashcard` | `POST` | `{ question: string, correctAnswer: string, userAnswer: string }` | `{ isCorrect: boolean, quality: number, feedback: string }` | Menilai keselarasan konseptual jawaban pengguna dibandingkan kunci jawaban asli berdasarkan skala kualitas SuperMemo-2 (skala 0-5). |
 | `/api/ai/generate-syllabus` | `POST` | `{ topic: string }` | `{ title: string, description: string, phases: [{ title, description, order, competencies: [...] }] }` | Merancang kurikulum modular baru lengkap dengan Fase Belajar dan Kompetensi dari topik masukan pengguna. |
 | `/api/ai/summarize-literature` | `POST` | `{ content: string }` | `{ mainProblem: string, methodology: string, conclusion: string }` | Memindai dokumen akademik panjang untuk menyaring tiga intisari utama: Masalah Utama, Metodologi, dan Kesimpulan Akhir. |
-| `/api/ai/book-info` | `POST` | `{ title: string, author?: string }` | `{ totalPages: number, coverUrl: string, isEstimated: boolean, author?: string }` | Mengambil metadata buku (jumlah halaman & sampul) secara berjenjang dari Open Library API publik (pencarian judul + penulis, lalu fallback judul saja) sebagai sumber utama akurat, dan beralih ke estimasi AI (`isEstimated: true`) hanya jika data tidak ditemukan di Open Library. |
+| `/api/ai/book-info` | `POST` | `{ title?: string, author?: string, isbn?: string, forceRefresh?: boolean }` | `{ candidates: BookCandidate[], totalPages: number, coverUrl: string, isEstimated: boolean, title?: string, author?: string, isbn?: string }` | Mengambil hingga 5 kandidat edisi buku secara paralel dari Open Library (parameter terstruktur `isbn`/`title`/`author`) dan Google Books (`isbn:`/`intitle:`/`+inauthor:`) dengan penyaringan ketat terhadap buku turunan serta validasi penulis, lalu beralih ke Google Search Grounding AI (`gemini-4-hydrogen`) jika data katalog belum lengkap. |
 
 ---
 
@@ -236,38 +250,35 @@ Server backend (`server.ts`) mengekspos 7 endpoint fungsional khusus untuk mempr
 
 Untuk melindungi infrastruktur server serta menghemat biaya konsumsi API pihak ketiga, server Express.js di Madrasah dilengkapi tiga lapisan proteksi internal:
 
-### 1. Gateway Penyedia AI Cerdas Mandiri (HCNSEC, OpenRouter, & Fallback Terakhir)
-Server backend secara terstruktur memprioritaskan penyedia AI mandiri non-Gemini melalui fungsi `executeAIRequest` dengan sistem **Peralihan Mulus (Seamless Failover)** dan **Validasi Ketat**:
-1. **Tier 1 — Provider Utama (HCNSEC / OpenAI-Compatible Provider)**:
-   - Membaca `HCNSEC_API_KEY` (atau fallback ke kredensial OpenAI).
-   - Format endpoint otomatis dinormalisasi ke `/chat/completions`.
-   - Urutan model kandidat adaptif: `HCNSEC_MODEL` mendukung daftar koma (mis. `Qwen3.8-27B, glm-5.3-flash`), lalu fallback terverifikasi. Urutan bersifat purpose-aware (hasil uji beban 2026-09-20): beban berat (`generate-syllabus`, `generate-flashcards`) mencoba `auto` dulu — satu-satunya model yang lolos generasi ~2000 token (~19s, JSON valid); beban ringan memakai `Qwen3.8-27B` → `glm-5.3-flash` → `Qwen3.8-Flash-Next` → `auto`. Model yang rusak di upstream (`DeepSeek-V4-Pro`, `DeepSeek-V4-Flash`, `DeepSeek-V4.1-Flash`, `qwen3.8-max`, `kimi-k3`, `MiniMax-M3`) otomatis disaring dari `HCNSEC_MODEL` (case-insensitive) dan tidak dipakai sebagai fallback otomatis.
-   - **Penanganan error per-status**: `404/400` (model tak dikenal) lanjut ke model berikut; `401/403` (key salah) langsung failover ke Tier 2; abort/timeout pada beban berat lanjut ke kandidat HCNSEC berikutnya (agar tetap mencapai `auto` dengan budget 30s per-model) dan hanya fast-fail bila kandidat habis atau sisa waktu menipis; beban ringan tetap fast-fail saat abort pertama; gagal jaringan langsung failover agar tidak menghabiskan sisa waktu Tier 2/3.
-   - **Kalkulasi Timeout Dinamis**: Memberikan sisa waktu proporsional (hingga 90% dari sisa waktu total maksimum) kepada model untuk menyelesaikan instruksi kompleks.
-2. **Tier 2 — Provider Sekunder (OpenRouter Multi-Model Failover)**:
-   - Membaca `OPENROUTER_API_KEY`.
-   - Menggunakan failover multi-model teruji (`deepseek/deepseek-chat`, `qwen/qwen-2.5-72b-instruct`, dll) jika model di Tier 1 tidak merespons tepat waktu atau mengembalikan output cacat.
-3. **Tier 3 — Cadangan Terakhir (Google GenAI SDK)**:
-   - Berfungsi murni sebagai jaring pengaman (*last-resort safety net*).
+### 1. Mesin AI Tunggal Google Gemini (Hybrid Hemat Token)
+Server backend berkomunikasi langsung dengan **Google Gemini API** melalui SDK resmi `@google/genai` (`User-Agent: 'aistudio-build'`) menggunakan pemetaan model hybrid berbasis beban dan efisiensi kuota:
+1. **Jalur Ringan & Kuantitas Tinggi — `gemini-3.1-flash-lite` (`ThinkingLevel.MINIMAL`)**:
+   - Tanpa konsumsi *thinking tokens*, latensi terendah, dan kapasitas kuota harian maksimal.
+   - Digunakan oleh: `/api/ai/suggest-tags`, `/api/ai/grade-flashcard`, `/api/ai/book-info` (hanya saat data Open Library & Google Books tidak lengkap), dan `/api/ai/summarize-literature`.
+2. **Jalur Sintesis & Struktur Kompleks — `gemini-4-hydrogen` (`ThinkingLevel.LOW`)**:
+   - Penalaran terukur dengan anggaran *thinking* minimum agar kualitas sintesis dan skema JSON tetap tajam namun tetap irit token.
+   - Digunakan oleh: `/api/ai/zettelkasten`, `/api/ai/generate-flashcards`, `/api/ai/generate-syllabus`, dan fallback Google Search Grounding pada `/api/ai/book-info`.
+3. **Ketahanan & Pengaman Kesalahan**:
+   - *Exponential backoff* otomatis untuk lonjakan sementara `503`/`UNAVAILABLE`, `abortSignal` batas waktu per model (~20s saat tersedia model cadangan) untuk failover lintas model cepat ke `gemini-3.1-flash-lite` pada `429`/`404`/timeout, serta pesan diagnostik jelas menuju **Settings > Secrets** bila `GEMINI_API_KEY` belum terpasang atau tidak valid.
 
-### 2. Formula Khusus per Fitur AI (Specialized Prompts & Parameters)
-Setiap endpoint API kini dilengkapi formula parameter unik (temperatur, batasan token, instruksi sistem terkalibrasi, dan **timeout maksimum global**):
-- **/api/ai/zettelkasten**: Formula Sintesis Ta'dib (Temp 0.25, MaxTokens 1200, Timeout 45s).
-- **/api/ai/suggest-tags**: Formula Taksonomi Presisi (Temp 0.1, MaxTokens 350, Timeout 45s).
-- **/api/ai/generate-flashcards**: Formula Active Recall MIP (Temp 0.2, MaxTokens 1000). **Timeout Diperpanjang: 80 detik** untuk mengakomodasi ekstrasi teks yang panjang.
-- **/api/ai/grade-flashcard**: Formula Penilaian Semantik SM-2 (Temp 0.0, MaxTokens 300, Timeout 45s).
-- **/api/ai/generate-syllabus**: Formula Taksonomi Bloom Berjenjang (Temp 0.25, MaxTokens 1600). **Timeout Diperpanjang: 90 detik** karena kompleksitas generasi kurikulum yang padat.
-- **/api/ai/summarize-literature**: Formula Tiga Pilar Telaah Akademik (Temp 0.15, MaxTokens 800, Timeout 45s).
-- **/api/ai/book-info**: Formula Estimasi Bibliografi (Temp 0.0, MaxTokens 250, Timeout 45s).
+### 2. Kompresi Konteks & Formula per Fitur AI
+Setiap endpoint menerapkan pemangkasan input di klien (`prepareSuggestTagsPayload`, `prepareZettelkastenPayload`, `prepareContentExcerpt`) dan server (`compactText`, `headTailExcerpt`, `selectRelevantZettelkastenContext`) dengan format JSON ketat:
+- **/api/ai/zettelkasten**: `gemini-4-hydrogen` (`ThinkingLevel.LOW`), seleksi 6 catatan, 6 konsep, 5 fragmen, dan 8 relasi paling relevan terhadap kata kunci prompt (Timeout 45s).
+- **/api/ai/suggest-tags**: `gemini-3.1-flash-lite` (`ThinkingLevel.MINIMAL`), konten *head+tail* ≤2.200 karakter + maks 15 judul catatan & 12 konsep (Timeout 45s).
+- **/api/ai/generate-flashcards**: `gemini-4-hydrogen` (`ThinkingLevel.LOW`), konten *head+tail* ≤4.500 karakter, menghasilkan 5–7 kartu atomik MIP (Timeout 48s).
+- **/api/ai/grade-flashcard**: `gemini-3.1-flash-lite` (`ThinkingLevel.MINIMAL`), evaluasi semantik skala SM-2 (0–5) dengan feedback 1–2 kalimat (Timeout 45s).
+- **/api/ai/generate-syllabus**: `gemini-4-hydrogen` (`ThinkingLevel.LOW`) dengan failover otomatis ke `gemini-3.1-flash-lite`, topik ≤300 karakter, menghasilkan 3 fase × 3–4 kompetensi ringkas (Timeout 45s).
+- **/api/ai/summarize-literature**: `gemini-3.1-flash-lite` (`ThinkingLevel.MINIMAL`), konten *head+tail* ≤4.500 karakter, menghasilkan 3 pilar telaah (Timeout 45s).
+- **/api/ai/book-info**: Pencarian paralel Open Library + Google Books (0 token AI) berbasis ISBN/judul/penulis dengan penyaringan ketat per edisi → `gemini-4-hydrogen` (`ThinkingLevel.LOW`, alat `googleSearch`) hanya bila kandidat kuat atau jumlah halaman masih kosong.
 
 ### 3. Pembatasan Frekuensi (Rate Limiting)
 - **API Limiter Umum** (`/api/*`): Membatasi setiap alamat IP pengguna maksimal 100 panggilan dalam jendela waktu 15 menit.
 - **AI Limiter Khusus** (`/api/ai/*`): Membatasi panggilan AI maksimal 30 permintaan per IP per menit untuk mencegah kelebihan beban pada kuota API.
 
-### 4. In-Memory Caching Engine (TTL 1 Jam)
-Server mendirikan mekanisme cache memori internal (`aiCache`) dengan masa aktif selama **1 jam**.
-- Setiap kali ada permintaan AI masuk, server membuat kunci unik berdasarkan hash endpoint dan isi payload body.
-- Jika permintaan dengan parameter yang sama masuk kembali sebelum batas waktu TTL berakhir, server akan mengembalikan hasil instan dari cache memori tanpa melakukan transaksi HTTP ulang ke penyedia AI luar.
+### 4. Bounded LRU Caching Engine (TTL 2 Jam, Maks 500 Entri)
+Server menggunakan cache LRU terbatas (`BoundedAICache`) dengan masa aktif **2 jam** dan kapasitas maksimal **500 entri**.
+- Setiap permintaan AI menghasilkan kunci hash SHA-256 dari endpoint dan payload yang telah dinormalisasi (termasuk hash konteks terkompresi pada Zettelkasten).
+- Permintaan identik yang masuk kembali sebelum TTL berakhir langsung dilayani dari memori tanpa memanggil Google Gemini API.
 
 ### 5. Pembersihan JSON Kokoh (Robust JSON Parsing)
-Respons dari model bahasa besar (LLM) sering kali terkontaminasi oleh blok kode Markdown (misalnya \`\`\`json ... \`\`\`) atau koma ekstra (*trailing commas*). Server Madrasah dilengkapi fungsi pembersihan ekspresi reguler khusus (`cleanAndParseJson`) untuk mengekstrak dan memvalidasi objek JSON murni sebelum dikirimkan ke aplikasi klien.
+Respons model divalidasi dengan `responseSchema` dan dibersihkan otomatis melalui `cleanAndParseJson` (serta `repairTruncatedJson`) untuk menjamin struktur JSON valid sebelum dikirim ke klien.

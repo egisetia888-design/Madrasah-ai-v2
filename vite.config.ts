@@ -94,9 +94,6 @@ export default defineConfig(() => {
             if (id.includes('node_modules/d3') || id.includes('node_modules/recharts')) {
               return 'vendor-charts';
             }
-            if (id.includes('node_modules/firebase')) {
-              return 'vendor-firebase';
-            }
             if (id.includes('node_modules/katex') || id.includes('remark-math') || id.includes('rehype-katex')) {
               return 'vendor-math';
             }

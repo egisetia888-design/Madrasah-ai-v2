@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react"
-import { X, Zap, FileText, CheckCircle2, PenTool, Quote, Sparkles, FolderPlus, Flag, Calendar } from "lucide-react"
+import { Zap, FileText, CheckCircle2, PenTool, Quote, Sparkles, FolderPlus, Flag, Calendar } from "lucide-react"
 import { useUIStore } from "../../store/uiStore"
 import { useNotesStore } from "../../store/notesStore"
 import { useProjectsStore } from "../../store/projectsStore"
@@ -247,34 +247,25 @@ export function QuickAddDialog() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="p-0 overflow-hidden bg-white rounded-2xl border border-gray-200 shadow-2xl flex flex-col max-h-[88dvh] w-full max-w-lg mx-auto">
         {/* Clean Header with Auto-Classification Badge */}
-        <div className="px-4 py-3.5 sm:px-5 sm:py-3.5 bg-gray-50 border-b border-gray-200 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-gray-900 text-white flex items-center justify-center shadow-xs">
-                <Zap className="w-3.5 h-3.5 fill-current" />
+        <div className="px-4 py-3.5 sm:px-5 sm:py-4 pr-14 bg-gray-50 border-b border-gray-200 shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-gray-900 text-white flex items-center justify-center shadow-xs shrink-0">
+                <Zap className="w-4 h-4 fill-current" />
               </div>
               <div>
                 <h3 className="text-sm font-bold text-gray-900 font-display">Tangkapan Kilat</h3>
-                <p className="text-[11px] text-gray-500">Ketik apa pun, sistem otomatis mengklasifikasikan</p>
+                <p className="text-[11px] text-gray-500">Ketik apa pun, format otomatis menyesuaikan</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-gray-400 font-mono hidden sm:inline-block bg-white px-2 py-0.5 rounded border border-gray-200">
-                ⌘+Enter ↵
-              </span>
-              <button 
-                onClick={() => setOpen(false)} 
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-200/60 transition-colors"
-                aria-label="Tutup"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+            <span className="text-[10px] text-gray-400 font-mono hidden sm:inline-block bg-white px-2 py-0.5 rounded border border-gray-200">
+              ⌘+Enter ↵
+            </span>
           </div>
 
           {/* Real-time Classification & Override Bar */}
-          <div className="mt-3 flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-gray-200/80 shadow-2xs">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 bg-white px-2.5 py-1.5 rounded-xl border border-gray-200/80 shadow-2xs">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] uppercase font-bold text-gray-400 font-mono">Format:</span>
               <div className="inline-flex items-center gap-1 text-xs font-semibold text-gray-900">
@@ -286,7 +277,7 @@ export function QuickAddDialog() {
               </span>
             </div>
 
-            {/* Quick Type Override Pills */}
+            {/* Quick Type Override */}
             <div className="flex items-center gap-1">
               {(['note', 'task', 'quote', 'idea'] as CaptureType[]).map(t => (
                 <button
@@ -294,7 +285,7 @@ export function QuickAddDialog() {
                   type="button"
                   onClick={() => setManualTypeOverride(t === detectedType && manualTypeOverride ? null : t)}
                   className={cn(
-                    "px-1.5 py-0.5 text-[10px] font-medium rounded transition-colors cursor-pointer",
+                    "px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-medium rounded-lg transition-colors cursor-pointer min-h-[36px] sm:min-h-0",
                     detectedType === t
                       ? "bg-gray-900 text-white font-semibold"
                       : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
@@ -389,21 +380,19 @@ export function QuickAddDialog() {
 
           {/* Live Detected Entities Preview */}
           {detectedEntities.length > 0 && (
-            <div className="pt-2 border-t border-gray-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-              <span className="text-[10px] text-gray-400 shrink-0 flex items-center gap-1 font-mono">
-                <Sparkles className="w-3 h-3 text-gray-500" /> Auto-link:
+            <div className="pt-2.5 border-t border-gray-100 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-mono text-gray-600">
+              <span className="text-[11px] text-gray-400 shrink-0 flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-gray-500" /> Tautan otomatis:
               </span>
-              {detectedEntities.slice(0, 3).map(ent => (
-                <span
-                  key={ent.id}
-                  className="px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 border border-gray-200 text-gray-700 rounded shrink-0"
-                >
-                  {ent.label}
+              {detectedEntities.slice(0, 3).map((ent, idx) => (
+                <span key={ent.id} className="inline-flex items-center gap-1.5">
+                  {idx > 0 && <span className="text-gray-300">·</span>}
+                  <span className="font-medium text-gray-800">{ent.label}</span>
                 </span>
               ))}
               {detectedEntities.length > 3 && (
-                <span className="text-[10px] text-gray-400 shrink-0">
-                  +{detectedEntities.length - 3} lainnya
+                <span className="text-[11px] text-gray-400">
+                  · +{detectedEntities.length - 3} lainnya
                 </span>
               )}
             </div>
@@ -411,18 +400,18 @@ export function QuickAddDialog() {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between shrink-0">
-          <span className="text-[11px] text-gray-400 font-mono">
-            {content.length} karakter &middot; Zettelkasten terpadu
+        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-3 shrink-0">
+          <span className="text-[11px] text-gray-400 font-mono tabular-nums truncate">
+            {content.length} karakter · Zettelkasten
           </span>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={() => setOpen(false)}
-              className="h-8 text-xs text-gray-600 hover:text-gray-900"
+              className="text-gray-600 hover:text-gray-900"
             >
               Batal
             </Button>
@@ -430,9 +419,9 @@ export function QuickAddDialog() {
               size="sm"
               onClick={() => handleSubmit()}
               disabled={!content.trim() || isSubmitting}
-              className="h-8 text-xs gap-1.5 bg-gray-900 text-white hover:bg-gray-800"
+              className="gap-1.5 bg-gray-900 text-white hover:bg-gray-800"
             >
-              <Zap className="w-3 h-3 fill-current" />
+              <Zap className="w-3.5 h-3.5 fill-current" />
               <span>Simpan Cepat</span>
             </Button>
           </div>

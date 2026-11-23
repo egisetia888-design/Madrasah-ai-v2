@@ -108,10 +108,10 @@ export function AddNoteDialog({
 
   return (
     <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-      <DialogHeader>
-        <div className="flex items-center justify-between">
+      <DialogHeader className="pr-12">
+        <div className="flex items-center justify-between gap-2">
           <DialogTitle className="font-display text-gray-900 text-lg flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-gray-900 text-white flex items-center justify-center text-xs">
+            <div className="w-6 h-6 rounded-lg bg-gray-900 text-white flex items-center justify-center text-xs shrink-0">
               <Zap className="w-3.5 h-3.5" />
             </div>
             Catatan Baru
@@ -217,35 +217,27 @@ export function AddNoteDialog({
 
           {/* Live Auto-Link Entity Detection Bar */}
           {liveDetectedEntities.length > 0 && (
-            <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-2 animate-in fade-in duration-200">
-              <div className="flex items-center justify-between">
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-1.5 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-900">
                   <Sparkles className="w-3.5 h-3.5 text-gray-700" />
-                  <span>Entitas & Relasi Terdeteksi Otomatis ({liveDetectedEntities.length})</span>
+                  <span>Entitas Terdeteksi ({liveDetectedEntities.length})</span>
                 </div>
-                <span className="text-[10px] text-gray-500 font-mono">Tertaut saat disimpan</span>
+                <span className="text-[11px] text-gray-500 font-mono">Tertaut saat disimpan</span>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {liveDetectedEntities.map(ent => (
-                  <span
-                    key={ent.id}
-                    className="px-2 py-0.5 text-xs bg-white border border-gray-200 rounded-lg text-gray-800 flex items-center gap-1.5 shadow-2xs"
-                  >
-                    <span className="text-[10px] uppercase font-bold text-gray-400 font-mono">[{ent.type}]</span>
-                    <span className="font-medium">{ent.label}</span>
-                  </span>
-                ))}
-              </div>
+              <p className="text-xs font-mono text-gray-700 leading-relaxed">
+                {liveDetectedEntities.map(ent => `${ent.type}: ${ent.label}`).join(' · ')}
+              </p>
             </div>
           )}
 
           {/* Collapsible Metadata Bar: Folder, Tags, AI Auto-Tag */}
           <div className="pt-2 border-t border-gray-100 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => setShowMetadata(!showMetadata)}
-                className="text-xs font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="min-h-[44px] sm:min-h-0 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <TagIcon className="w-3.5 h-3.5" />
                 <span>{showMetadata ? 'Sembunyikan Opsi Folder & Tag' : 'Atur Folder & Tag (Opsional)'}</span>
@@ -257,9 +249,9 @@ export function AddNoteDialog({
                 size="sm"
                 onClick={handleSuggest}
                 disabled={isSuggesting || !content.trim()}
-                className="h-7 text-xs gap-1.5 bg-white text-gray-700 hover:bg-gray-50 border-gray-200 rounded-lg"
+                className="text-xs gap-1.5 bg-white text-gray-700 hover:bg-gray-50 border-gray-200"
               >
-                <Sparkles className="w-3 h-3 text-gray-700" />
+                <Sparkles className="w-3.5 h-3.5 text-gray-700" />
                 {isSuggesting ? "Menganalisis..." : "Saran Tag Otomatis"}
               </Button>
             </div>

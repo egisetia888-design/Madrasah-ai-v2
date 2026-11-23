@@ -4,7 +4,6 @@ import { Note, Folder, Tag } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
 import { SyncMetadata } from '../types';
 import { generateEmbedding } from '../lib/semanticSearch';
-import { syncSaveNote, syncDeleteNote } from '../lib/firestoreSync';
 import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface NotesState {
@@ -46,29 +45,21 @@ export const useNotesStore = create<NotesState>()(
         set((state) => ({
           notes: [newNote, ...state.notes]
         }));
-        syncSaveNote(newNote);
         return id;
       },
       
       updateNote: (id, noteData) => {
-        set((state) => {
-          const updatedNotes = state.notes.map(n => {
-            if (n.id === id) {
-              const updated = { ...n, ...noteData, ...updateSyncMetadata(n) };
-              syncSaveNote(updated);
-              return updated;
-            }
-            return n;
-          });
-          return { notes: updatedNotes };
-        });
+        set((state) => ({
+          notes: state.notes.map(n =>
+            n.id === id ? { ...n, ...noteData, ...updateSyncMetadata(n) } : n
+          )
+        }));
       },
       
       deleteNote: (id) => {
         set((state) => ({
           notes: state.notes.filter(n => n.id !== id)
         }));
-        syncDeleteNote(id);
       },
 
       addFolder: (name, parentId = null) => {
@@ -121,14 +112,9 @@ export const useNotesStore = create<NotesState>()(
           const embedding = await generateEmbedding(textToEmbed);
           
           set((state) => ({
-            notes: state.notes.map(n => {
-              if (n.id === id) {
-                const updated = { ...n, embedding };
-                syncSaveNote(updated);
-                return updated;
-              }
-              return n;
-            })
+            notes: state.notes.map(n =>
+              n.id === id ? { ...n, embedding } : n
+            )
           }));
         } catch (error) {
           console.error('Failed to index note:', error);

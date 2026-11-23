@@ -1,15 +1,17 @@
-import { SyncStatusIndicator } from '../../components/ui/SyncStatusIndicator';
-import { useState, useMemo } from "react"
+import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "../../components/ui/Button"
-import { Plus, PenLine, FileText, MoreVertical, LayoutGrid, List, Network, Sparkles } from "lucide-react"
+import { PageHeader } from "../../components/ui/PageHeader"
+import { EmptyState } from "../../components/ui/EmptyState"
+import { MetadataRow } from "../../components/ui/MetadataRow"
+import { Plus, PenLine, LayoutGrid, List, Network } from "lucide-react"
 import * as LucideIcons from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog"
 import { useWritingStore } from "../../store/writingStore"
 import { useKnowledgeStore } from "../../store/knowledgeStore"
 import { WritingStatus } from "../../types"
 import { cn } from "../../utils/cn"
-import { scanTextForEntities, autoLinkSingleEntity } from "../../utils/autoLinker"
+import { autoLinkSingleEntity } from "../../utils/autoLinker"
 
 const WRITING_PIPELINE: { id: WritingStatus; label: string }[] = [
   { id: 'idea', label: 'Ide' },
@@ -58,35 +60,32 @@ export function WritingPage() {
 
   const renderCard = (draft: any) => {
     const relCount = relations.filter(r => r.sourceNodeId === draft.id || r.targetNodeId === draft.id).length;
+    const wordCount = draft.content.split(/\s+/).filter((w: string) => w.length > 0).length;
 
     return (
-      <div key={draft.id} onClick={() => navigate(`/writing/${draft.id}`)} className="group border border-gray-200 rounded-xl bg-white p-4 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer flex flex-col h-40">
-        <div className="flex items-start justify-between mb-1.5">
-          <div className="flex items-center gap-2 pr-2 min-w-0">
-            {draft.icon && (
-              (() => {
-                const Icon = (LucideIcons as any)[draft.icon] || LucideIcons.FileText;
-                return <Icon className="w-3.5 h-3.5 text-gray-500 shrink-0" />;
-              })()
-            )}
-            <h3 className="font-medium text-gray-900 line-clamp-2 leading-snug">{draft.title}</h3>
-          </div>
-          <button className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-900 shrink-0">
-            <MoreVertical className="w-4 h-4" />
-          </button>
+      <div key={draft.id} onClick={() => navigate(`/writing/${draft.id}`)} className="group border border-gray-200 rounded-2xl bg-white p-4 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer flex flex-col min-h-[9.5rem]">
+        <div className="flex items-start gap-2 mb-1.5 min-w-0">
+          {draft.icon && (
+            (() => {
+              const Icon = (LucideIcons as any)[draft.icon] || LucideIcons.FileText;
+              return <Icon className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />;
+            })()
+          )}
+          <h3 className="font-semibold text-gray-900 line-clamp-2 leading-snug font-display">{draft.title}</h3>
         </div>
-        <p className="text-xs text-gray-500 line-clamp-2 flex-1 font-serif mt-1">{draft.content || "Mulai menulis..."}</p>
-        <div className="flex items-center justify-between text-[10px] text-gray-400 mt-auto pt-3 border-t border-gray-50 uppercase tracking-wider font-semibold">
-          <div className="flex items-center gap-2">
-            <span>{new Date(draft.updatedAt).toLocaleDateString()}</span>
-            <SyncStatusIndicator status={draft.syncStatus} />
-            {relCount > 0 && (
-              <span className="inline-flex items-center gap-0.5 text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded text-[9px] font-mono lowercase">
-                <Network className="w-2.5 h-2.5" /> {relCount} relasi
-              </span>
-            )}
-          </div>
-          <span>{draft.content.split(/\s+/).filter((w: string) => w.length > 0).length} kata</span>
+        <p className="text-xs text-gray-500 line-clamp-2 flex-1 font-serif mt-1 leading-relaxed">{draft.content || "Mulai menulis..."}</p>
+        <div className="mt-auto pt-3 border-t border-gray-100">
+          <MetadataRow
+            items={[
+              new Date(draft.updatedAt).toLocaleDateString('id-ID'),
+              `${wordCount} kata`,
+              relCount > 0 && (
+                <span className="inline-flex items-center gap-1 text-gray-700">
+                  <Network className="w-3 h-3" /> {relCount} relasi
+                </span>
+              ),
+            ]}
+          />
         </div>
       </div>
     );
@@ -101,62 +100,75 @@ export function WritingPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 h-full flex flex-col w-full min-w-0 pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
-        <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 font-display">Alur Menulis</h1>
-          <p className="text-gray-500 mt-1 text-xs sm:text-sm">Kelola siklus hidup karya intelektual Anda.</p>
-        </div>
-        <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
-          <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
-            <button 
-              onClick={() => setViewMode('board')} 
-              className={`p-2 rounded-lg transition-all ${viewMode === 'board' ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
-              title="Tampilan Papan"
-            >
-               <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button 
-              onClick={() => setViewMode('list')} 
-              className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
-              title="Tampilan Daftar"
-            >
-               <List className="w-4 h-4" />
-            </button>
+      <PageHeader
+        title="Alur Menulis"
+        description="Kelola siklus hidup karya intelektual Anda dari ide hingga publikasi."
+        className="shrink-0"
+        actions={
+          <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
+            <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
+              <button
+                type="button"
+                onClick={() => setViewMode('board')}
+                className={cn(
+                  "min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-2 flex items-center justify-center rounded-lg transition-all cursor-pointer",
+                  viewMode === 'board' ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'
+                )}
+                title="Tampilan Papan"
+                aria-label="Tampilan Papan"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={cn(
+                  "min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-2 flex items-center justify-center rounded-lg transition-all cursor-pointer",
+                  viewMode === 'list' ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'
+                )}
+                title="Tampilan Daftar"
+                aria-label="Tampilan Daftar"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
+            <Button className="gap-2 shrink-0 flex-1 sm:flex-initial" onClick={() => setIsAddOpen(true)}>
+              <Plus className="w-4 h-4" />
+              <span>Ide Baru</span>
+            </Button>
           </div>
-          <Button className="gap-2 shrink-0 h-11 sm:h-9 flex-1 sm:flex-initial" onClick={() => setIsAddOpen(true)}>
-            <Plus className="w-4 h-4" />
-            <span>Ide Baru</span>
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {viewMode === 'list' && (
         <div className="flex items-center gap-1.5 overflow-x-auto w-full no-scrollbar py-1 scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0 border-b border-gray-200 pb-3">
           <button
+            type="button"
             onClick={() => setActiveStageFilter('all')}
             className={cn(
-              "px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
+              "px-3.5 min-h-[44px] sm:min-h-0 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
               activeStageFilter === 'all'
                 ? "bg-gray-900 text-white shadow-sm font-semibold"
                 : "bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50"
             )}
           >
-            Semua ({drafts.length})
+            Semua (<span className="font-mono tabular-nums">{drafts.length}</span>)
           </button>
           {WRITING_PIPELINE.map(stage => {
             const count = drafts.filter(d => (d.status as string) === stage.id || (stage.id === 'draft' && !WRITING_PIPELINE.map(p=>p.id).includes(d.status as WritingStatus))).length;
             return (
               <button
+                type="button"
                 key={stage.id}
                 onClick={() => setActiveStageFilter(stage.id)}
                 className={cn(
-                  "px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
+                  "px-3.5 min-h-[44px] sm:min-h-0 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
                   activeStageFilter === stage.id
                     ? "bg-gray-900 text-white shadow-sm font-semibold"
                     : "bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                 )}
               >
-                {stage.label} ({count})
+                {stage.label} (<span className="font-mono tabular-nums">{count}</span>)
               </button>
             );
           })}
@@ -165,28 +177,26 @@ export function WritingPage() {
 
       <div className="flex-1 w-full min-w-0">
         {drafts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 h-full text-center border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50/30 p-6">
-             <div className="w-12 h-12 bg-white shadow-sm rounded-2xl border border-gray-200 flex items-center justify-center mb-4 text-gray-400">
-               <PenLine className="w-6 h-6" />
-             </div>
-             <h3 className="text-base font-semibold text-gray-900 font-display">Alur Anda kosong</h3>
-             <p className="text-xs sm:text-sm text-gray-500 mt-1 mb-4 max-w-sm">
-               Tangkap ide untuk memulai proses menulis.
-             </p>
-             <Button variant="outline" size="sm" className="gap-2" onClick={() => setIsAddOpen(true)}>
-               <Plus className="w-3.5 h-3.5" />
-               Ide Baru
-             </Button>
-          </div>
+          <EmptyState
+            icon={PenLine}
+            title="Alur menulis masih kosong"
+            description="Tangkap satu ide atau tesis awal untuk mulai mengembangkannya menjadi tulisan utuh."
+            action={
+              <Button className="gap-2" onClick={() => setIsAddOpen(true)}>
+                <Plus className="w-4 h-4" />
+                Ide Baru
+              </Button>
+            }
+          />
         ) : viewMode === 'board' ? (
-          <div className="flex gap-3.5 overflow-x-auto w-full no-scrollbar pb-4 min-h-[400px] snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0">
+          <div className="flex gap-4 overflow-x-auto w-full no-scrollbar pb-4 min-h-[400px] snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0">
             {WRITING_PIPELINE.map(stage => {
               const stageDrafts = drafts.filter(d => (d.status as string) === stage.id || (stage.id === 'draft' && !WRITING_PIPELINE.map(p=>p.id).includes(d.status as WritingStatus)))
               return (
                 <div key={stage.id} className="w-[82vw] sm:w-72 shrink-0 flex flex-col bg-white rounded-2xl border border-gray-200 shadow-xs snap-center">
                   <div className="p-3.5 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white/95 backdrop-blur-sm z-10 rounded-t-2xl">
                     <h3 className="font-bold text-xs text-gray-900 uppercase tracking-wider font-mono">{stage.label}</h3>
-                    <span className="text-[11px] font-bold text-gray-600 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-full font-mono">{stageDrafts.length}</span>
+                    <span className="text-xs font-semibold text-gray-500 font-mono tabular-nums">{stageDrafts.length}</span>
                   </div>
                   <div className="p-2.5 flex-1 overflow-y-auto space-y-2.5 max-h-[60vh]">
                     {stageDrafts.map(renderCard)}

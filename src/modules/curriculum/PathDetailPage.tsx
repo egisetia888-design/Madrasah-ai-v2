@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
-import { ArrowLeft, Plus, MoreVertical, BookOpen, PenTool, Brain, Target, CheckCircle2, ChevronRight, Circle, Trash2, Edit2, Save, Network, ArrowUpRight, FileText, Share2 } from "lucide-react";
+import { ArrowLeft, Plus, BookOpen, PenTool, Target, Trash2, Edit2, Save, FileText, Share2 } from "lucide-react";
 import { useCurriculumStore } from "../../store/curriculumStore";
 import { useLibraryStore } from "../../store/libraryStore";
 import { useWritingStore } from "../../store/writingStore";
-import { useKnowledgeStore } from "../../store/knowledgeStore";
 import { useNotesStore } from "../../store/notesStore";
 import { useToastStore } from "../../store/toastStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog";
-import { scanTextForEntities, autoLinkSingleEntity, createExplicitRelation } from "../../utils/autoLinker";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { MetadataRow } from "../../components/ui/MetadataRow";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { autoLinkSingleEntity, createExplicitRelation } from "../../utils/autoLinker";
 import { ShareCurriculumModal } from "../../components/curriculum/ShareCurriculumModal";
 
 export function PathDetailPage() {
@@ -44,6 +46,8 @@ export function PathDetailPage() {
   const [newCompTitle, setNewCompTitle] = useState("");
 
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [phaseToDelete, setPhaseToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [compToDelete, setCompToDelete] = useState<{ id: string; title: string } | null>(null);
   
   const [isManageCompOpen, setIsManageCompOpen] = useState(false);
   const [activeCompForManage, setActiveCompForManage] = useState<string | null>(null);
@@ -57,8 +61,8 @@ export function PathDetailPage() {
 
   if (!path) {
     return (
-      <div className="flex flex-col items-center justify-center h-full space-y-4">
-        <h2 className="text-xl font-medium text-gray-900">Kurikulum tidak ditemukan</h2>
+      <div className="flex flex-col items-center justify-center h-full space-y-4 py-20 text-center">
+        <h2 className="text-xl font-semibold text-gray-900 font-display">Kurikulum tidak ditemukan</h2>
         <Button variant="outline" onClick={() => navigate("/curriculum")}>
           <ArrowLeft className="w-4 h-4 mr-2" /> Kembali ke Kurikulum
         </Button>
@@ -201,19 +205,19 @@ export function PathDetailPage() {
     navigate(`/notes/${noteId}`);
   };
 
-  const getBookTitle = (id: string) => books.find(b => b.id === id)?.title || "Unknown Book";
-  const getDraftTitle = (id: string) => drafts.find(d => d.id === id)?.title || "Unknown Output";
+  const getBookTitle = (id: string) => books.find(b => b.id === id)?.title || "Buku Tidak Ditemukan";
+  const getDraftTitle = (id: string) => drafts.find(d => d.id === id)?.title || "Tulisan Tidak Ditemukan";
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 max-w-5xl mx-auto pb-20">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-6">
-        <div className="flex-1 w-full">
+        <div className="flex-1 w-full min-w-0">
           <div className="flex items-center justify-between mb-2">
             <Button variant="ghost" className="gap-2 -ml-3 text-gray-500 hover:text-gray-900" onClick={() => navigate("/curriculum")}>
               <ArrowLeft className="w-4 h-4" /> Kembali
             </Button>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" className="gap-2 text-gray-900 hover:text-gray-800 hover:bg-gray-50" onClick={() => setIsDeleteDialogOpen(true)}>
+              <Button variant="ghost" className="gap-2 text-gray-700 hover:text-gray-900 hover:bg-gray-100" onClick={() => setIsDeleteDialogOpen(true)}>
                 <Trash2 className="w-4 h-4" />
                 <span className="hidden sm:inline">Hapus</span>
               </Button>
@@ -226,13 +230,13 @@ export function PathDetailPage() {
                 type="text"
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
-                className="text-3xl font-bold tracking-tight text-gray-900 bg-transparent border-b border-gray-300 outline-none w-full placeholder:text-gray-300 focus:ring-0 focus:border-gray-900 p-0"
+                className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 font-display bg-transparent border-b border-gray-300 outline-none w-full placeholder:text-gray-300 focus:ring-0 focus:border-gray-900 pb-1"
                 placeholder="Judul Kurikulum"
               />
               <textarea
                 value={editDesc}
                 onChange={(e) => setEditDesc(e.target.value)}
-                className="w-full min-h-[60px] text-base text-gray-600 bg-transparent border border-gray-300 rounded-md outline-none resize-none placeholder:text-gray-300 focus:ring-1 focus:ring-gray-900 p-2"
+                className="w-full min-h-[72px] text-sm sm:text-base text-gray-600 bg-white border border-gray-200 rounded-xl outline-none resize-none placeholder:text-gray-300 focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 p-3"
                 placeholder="Deskripsi kurikulum..."
               />
               <div className="flex items-center gap-2">
@@ -243,151 +247,160 @@ export function PathDetailPage() {
               </div>
             </div>
           ) : (
-            <div className="group relative pr-8 max-w-2xl mt-4">
-              <h1 className="text-3xl font-bold tracking-tight text-gray-900">{path.title}</h1>
-              <p className="text-gray-500 mt-1">{path.description}</p>
-              <button onClick={startEditing} className="absolute right-0 top-0 p-2 text-gray-400 hover:text-gray-900 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="group relative pr-12 max-w-2xl mt-4">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 font-display">{path.title}</h1>
+              <p className="text-gray-500 mt-1.5 text-sm sm:text-base leading-relaxed">{path.description}</p>
+              <button
+                type="button"
+                onClick={startEditing}
+                aria-label="Edit judul dan deskripsi kurikulum"
+                className="absolute right-0 top-0 min-h-[44px] min-w-[44px] md:min-h-[36px] md:min-w-[36px] flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-xl opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all"
+              >
                 <Edit2 className="w-4 h-4" />
               </button>
             </div>
           )}
         </div>
         
-        <div className="flex flex-col items-end gap-1 shrink-0 bg-gray-50 p-4 rounded-xl border border-gray-100">
-           <span className="text-sm font-medium text-gray-500 uppercase tracking-wider">Progres Keseluruhan</span>
+        <div className="flex flex-col sm:items-end gap-2 shrink-0 bg-gray-50 p-4 rounded-2xl border border-gray-200">
+           <span className="text-xs font-medium text-gray-500 font-mono uppercase tracking-wider">Progres Keseluruhan</span>
            <div className="flex items-center gap-3 w-full sm:w-48">
               <div className="h-2 flex-1 bg-gray-200 rounded-full overflow-hidden">
-                <div className="h-full bg-gray-900 rounded-full" style={{ width: `${progressPercent}%` }}></div>
+                <div className="h-full bg-gray-900 rounded-full transition-all duration-500" style={{ width: `${progressPercent}%` }}></div>
               </div>
-              <span className="font-bold text-lg text-gray-900">{progressPercent}%</span>
+              <span className="font-bold text-lg text-gray-900 font-mono tabular-nums">{progressPercent}%</span>
            </div>
         </div>
       </div>
 
       <div className="space-y-8">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-gray-900">Peta Kurikulum</h2>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold text-gray-900 font-display">Peta Kurikulum</h2>
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              className="gap-2 text-gray-700 border-gray-200 hover:bg-gray-50 h-9"
+              className="gap-2 text-gray-700 border-gray-200 hover:bg-gray-50"
               onClick={() => setIsShareModalOpen(true)}
             >
               <Share2 className="w-4 h-4 text-gray-500" />
-              <span className="hidden sm:inline">Bagikan Silabus</span>
+              <span>Bagikan Silabus</span>
             </Button>
-            <Button size="sm" className="gap-2 bg-gray-900 text-white hover:bg-gray-800 h-9" onClick={() => setIsAddPhaseOpen(true)}>
+            <Button size="sm" className="gap-2 bg-gray-900 text-white hover:bg-gray-800" onClick={() => setIsAddPhaseOpen(true)}>
               <Plus className="w-4 h-4" /> Tambah Fase
             </Button>
           </div>
         </div>
 
         {phases.length === 0 ? (
-           <div className="text-center py-12 border border-dashed border-gray-200 rounded-xl bg-gray-50 text-gray-500">
-             <p>Belum ada fase yang ditentukan. Bagi kurikulum ini menjadi beberapa fase.</p>
-           </div>
+           <EmptyState
+             compact
+             icon={Target}
+             title="Belum ada fase kurikulum"
+             description="Bagi kurikulum ini menjadi beberapa fase belajar agar kompetensi mudah dipantau."
+             action={
+               <Button size="sm" onClick={() => setIsAddPhaseOpen(true)} className="gap-2">
+                 <Plus className="w-4 h-4" /> Tambah Fase Pertama
+               </Button>
+             }
+           />
         ) : (
-          <div className="space-y-12">
+          <div className="space-y-10">
             {phases.map((phase, idx) => {
               const phaseCompetencies = competencies.filter(c => c.phaseId === phase.id).sort((a,b) => a.order - b.order);
               return (
                 <div key={phase.id} className="relative">
                   {idx !== phases.length - 1 && (
-                    <div className="absolute left-[1.1rem] top-10 bottom-[-3rem] w-px bg-gray-200 z-0 hidden md:block"></div>
+                    <div className="absolute left-[1.1rem] top-10 bottom-[-2.5rem] w-px bg-gray-200 z-0 hidden md:block"></div>
                   )}
                   
                   <div className="flex items-start gap-4 relative z-10">
-                    <div className="w-9 h-9 rounded-full bg-gray-900 text-white flex items-center justify-center font-bold text-sm shrink-0 border-4 border-white hidden md:flex">
+                    <div className="w-9 h-9 rounded-xl bg-gray-900 text-white items-center justify-center font-bold font-mono tabular-nums text-sm shrink-0 border-4 border-white hidden md:flex">
                       {idx + 1}
                     </div>
                     
-                    <div className="flex-1 space-y-4">
-                      <div className="flex items-center justify-between bg-white px-4 py-3 border border-gray-200 rounded-xl shadow-sm">
-                        <h3 className="font-semibold text-lg text-gray-900 flex items-center gap-2">
-                          Fase {idx + 1}: {phase.title}
-                          <button onClick={() => {
-                            if (window.confirm("Yakin ingin menghapus fase ini beserta kompetensinya?")) {
-                              deletePhase(phase.id);
-                            }
-                          }} className="text-gray-400 hover:text-gray-500 transition-colors p-1">
-                            <Trash2 className="w-3.5 h-3.5" />
+                    <div className="flex-1 space-y-4 min-w-0">
+                      <div className="flex flex-wrap items-center justify-between gap-2 bg-white px-4 py-3 border border-gray-200 rounded-2xl shadow-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <h3 className="font-semibold text-base sm:text-lg text-gray-900 font-display truncate">
+                            Fase {idx + 1}: {phase.title}
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={() => setPhaseToDelete({ id: phase.id, title: phase.title })}
+                            aria-label={`Hapus fase ${phase.title}`}
+                            className="text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-colors min-h-[40px] min-w-[40px] md:min-h-[32px] md:min-w-[32px] flex items-center justify-center rounded-xl shrink-0"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
-                        </h3>
-                        <Button variant="ghost" size="sm" onClick={() => openAddCompetency(phase.id)} className="h-8">
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => openAddCompetency(phase.id)}>
                           <Plus className="w-4 h-4 mr-1" /> Kompetensi
                         </Button>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-0 md:pl-2">
                          {phaseCompetencies.length === 0 ? (
-                           <div className="md:col-span-2 text-sm text-gray-400 py-4 px-4 italic border border-dashed border-gray-100 rounded-lg">
-                             No competencies defined for this phase.
+                           <div className="md:col-span-2 text-sm text-gray-400 py-5 px-4 text-center border border-dashed border-gray-200 rounded-2xl bg-gray-50/50">
+                             Belum ada kompetensi pada fase ini.
                            </div>
                          ) : (
                            phaseCompetencies.map(comp => (
-                             <div key={comp.id} className="border border-gray-200 rounded-xl bg-white p-4 hover:border-gray-200 transition-colors flex flex-col h-full shadow-sm">
+                             <div key={comp.id} className="border border-gray-200 rounded-2xl bg-white p-4 sm:p-5 hover:border-gray-300 transition-colors flex flex-col h-full shadow-sm">
                                <div className="flex items-start gap-3 relative group/comp">
-                                 <button onClick={() => {
-                                   if (window.confirm("Yakin ingin menghapus kompetensi ini?")) {
-                                     deleteCompetency(comp.id);
-                                   }
-                                 }} className="absolute -right-2 -top-2 opacity-0 group-hover/comp:opacity-100 p-1.5 text-gray-400 hover:text-gray-500 hover:bg-gray-50 rounded transition-all">
-                                   <Trash2 className="w-4 h-4" />
-                                 </button>
-                                 <div className="flex-1">
-                                   <div className="flex items-start justify-between pr-6">
-                                     <h4 className={`font-medium ${comp.status === 'done' ? 'text-gray-500 line-through' : 'text-gray-900'}`}>{comp.title}</h4>
-                                     <select 
-                                       value={comp.status}
-                                       onChange={(e) => updateCompetency(comp.id, { status: e.target.value as any })}
-                                       className={`text-xs font-medium rounded-md px-2 py-1 border outline-none ${
-                                          comp.status === 'done' ? 'bg-gray-50 text-gray-800 border-gray-200' :
-                                          comp.status === 'in-progress' ? 'bg-gray-50 text-gray-800 border-gray-200' :
-                                          'bg-gray-50 text-gray-700 border-gray-200'
-                                       }`}
-                                     >
-                                       <option value="not-started">Belum Mulai</option>
-                                       <option value="in-progress">Proses</option>
-                                       <option value="done">Selesai</option>
-                                     </select>
+                                 <div className="flex-1 min-w-0">
+                                   <div className="flex flex-wrap items-start justify-between gap-2">
+                                     <h4 className={`font-medium font-display text-sm sm:text-base flex-1 min-w-0 ${comp.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{comp.title}</h4>
+                                     <div className="flex items-center gap-1 shrink-0">
+                                       <select 
+                                         value={comp.status}
+                                         onChange={(e) => updateCompetency(comp.id, { status: e.target.value as any })}
+                                         className="text-xs font-medium rounded-xl px-2.5 h-10 md:h-8 border border-gray-200 bg-white text-gray-700 outline-none focus:ring-2 focus:ring-gray-900/10"
+                                       >
+                                         <option value="not-started">Belum Mulai</option>
+                                         <option value="in-progress">Proses</option>
+                                         <option value="done">Selesai</option>
+                                       </select>
+                                       <button
+                                         type="button"
+                                         onClick={() => setCompToDelete({ id: comp.id, title: comp.title })}
+                                         aria-label={`Hapus kompetensi ${comp.title}`}
+                                         className="opacity-100 md:opacity-0 md:group-hover/comp:opacity-100 min-h-[40px] min-w-[40px] md:min-h-[32px] md:min-w-[32px] flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-xl transition-all"
+                                       >
+                                         <Trash2 className="w-4 h-4" />
+                                       </button>
+                                     </div>
                                    </div>
                                    
                                    {/* Entity Linkages */}
-                                   <div className="mt-4 pt-4 border-t border-gray-100">
-                                     <div className="flex flex-wrap items-center gap-2 mb-3">
-                                       <span className="inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                                         <BookOpen className="w-3 h-3" /> {comp.bookIds.length} Buku
-                                       </span>
-                                       <span className="inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                                         <PenTool className="w-3 h-3" /> {comp.outputIds.length} Hasil
-                                       </span>
-                                       <span className="inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                                         <Target className="w-3 h-3" /> Asesmen: {comp.assessmentStatus || 'Tidak ada'}
-                                       </span>
+                                   <div className="mt-4 pt-3 border-t border-gray-100 space-y-2.5">
+                                     <div className="flex flex-wrap items-center justify-between gap-2">
+                                       <MetadataRow
+                                         items={[
+                                           `${comp.bookIds.length} buku`,
+                                           `${comp.outputIds.length} tulisan`,
+                                           `Asesmen: ${comp.assessmentStatus || 'Belum'}`,
+                                         ]}
+                                       />
                                        <div className="flex items-center gap-1 ml-auto">
-                                         <Button variant="ghost" size="sm" onClick={() => handleAddStudyNote(comp)} className="h-6 text-[10px] px-2 text-gray-700 hover:text-gray-900">
-                                           <FileText className="w-3 h-3 mr-1" /> Catat
+                                         <Button variant="ghost" size="sm" onClick={() => handleAddStudyNote(comp)} className="text-xs px-2.5 text-gray-700 hover:text-gray-900">
+                                           <FileText className="w-3.5 h-3.5 mr-1" /> Catat
                                          </Button>
-                                         <Button variant="ghost" size="sm" onClick={() => openManageCompetency(comp.id)} className="h-6 text-[10px] px-2">
+                                         <Button variant="ghost" size="sm" onClick={() => openManageCompetency(comp.id)} className="text-xs px-2.5">
                                            Kelola
                                          </Button>
                                        </div>
                                      </div>
-                                     {comp.bookIds.length > 0 && (
-                                       <div className="flex flex-wrap gap-1 mb-2">
+                                     {(comp.bookIds.length > 0 || comp.outputIds.length > 0) && (
+                                       <div className="flex flex-wrap gap-1.5 text-xs text-gray-600 font-mono">
                                          {comp.bookIds.map(bid => (
-                                            <span key={bid} className="inline-flex items-center text-[10px] text-gray-800 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded truncate max-w-[150px]">
-                                              <BookOpen className="w-3 h-3 mr-1 shrink-0" /> {getBookTitle(bid)}
+                                            <span key={bid} className="inline-flex items-center gap-1 truncate max-w-[180px] text-gray-700">
+                                              <BookOpen className="w-3 h-3 shrink-0 text-gray-400" /> {getBookTitle(bid)}
                                             </span>
                                          ))}
-                                       </div>
-                                     )}
-                                     {comp.outputIds.length > 0 && (
-                                       <div className="flex flex-wrap gap-1">
                                          {comp.outputIds.map(oid => (
-                                            <span key={oid} className="inline-flex items-center text-[10px] text-gray-800 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded truncate max-w-[150px]">
-                                              <PenTool className="w-3 h-3 mr-1 shrink-0" /> {getDraftTitle(oid)}
+                                            <span key={oid} className="inline-flex items-center gap-1 truncate max-w-[180px] text-gray-700">
+                                              <PenTool className="w-3 h-3 shrink-0 text-gray-400" /> {getDraftTitle(oid)}
                                             </span>
                                          ))}
                                        </div>
@@ -421,7 +434,7 @@ export function PathDetailPage() {
                 value={newPhaseTitle}
                 onChange={(e) => setNewPhaseTitle(e.target.value)}
                 type="text" 
-                className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-950" 
+                className="flex h-11 md:h-9 w-full rounded-xl border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/10 focus-visible:border-gray-900" 
                 placeholder="Contoh: Dasar Inti"
                 required
               />
@@ -446,8 +459,8 @@ export function PathDetailPage() {
               <textarea 
                 value={newCompTitle}
                 onChange={(e) => setNewCompTitle(e.target.value)}
-                className="flex min-h-[80px] w-full rounded-md border border-gray-200 bg-transparent px-3 py-2 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-950 resize-none" 
-                placeholder="Contoh: Mampu membuat desain figma"
+                className="flex min-h-[80px] w-full rounded-xl border border-gray-200 bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/10 focus-visible:border-gray-900 resize-none" 
+                placeholder="Contoh: Mampu menyusun ringkasan metodologis bab pertama"
                 required
               />
               <p className="text-xs text-gray-500">Progres diukur dengan menguasai kompetensi ini, bukan hanya membaca buku.</p>
@@ -459,29 +472,58 @@ export function PathDetailPage() {
           </DialogFooter>
         </form>
       </Dialog>
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogHeader>
-          <DialogTitle>Hapus Kurikulum</DialogTitle>
-        </DialogHeader>
-        <DialogContent>
-          <p className="text-gray-600">Apakah Anda yakin ingin menghapus kurikulum "{path.title}"? Semua fase dan kompetensi di dalamnya akan terhapus. Tindakan ini tidak dapat dibatalkan.</p>
-        </DialogContent>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setIsDeleteDialogOpen(false)}>Batal</Button>
-          <Button variant="destructive" onClick={handleDeletePath} className="bg-gray-900 hover:bg-gray-800 text-white">Hapus Kurikulum</Button>
-        </DialogFooter>
-      </Dialog>
+
+      <ConfirmDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        title="Hapus Kurikulum"
+        description={`Apakah Anda yakin ingin menghapus kurikulum "${path.title}"? Semua fase dan kompetensi di dalamnya akan terhapus.`}
+        confirmLabel="Hapus Kurikulum"
+        onConfirm={handleDeletePath}
+      />
+
+      <ConfirmDialog
+        open={Boolean(phaseToDelete)}
+        onOpenChange={(open) => {
+          if (!open) setPhaseToDelete(null);
+        }}
+        title="Hapus Fase"
+        description={`Apakah Anda yakin ingin menghapus fase "${phaseToDelete?.title || ''}" beserta seluruh kompetensinya?`}
+        confirmLabel="Hapus Fase"
+        onConfirm={() => {
+          if (phaseToDelete) {
+            deletePhase(phaseToDelete.id);
+            setPhaseToDelete(null);
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(compToDelete)}
+        onOpenChange={(open) => {
+          if (!open) setCompToDelete(null);
+        }}
+        title="Hapus Kompetensi"
+        description={`Apakah Anda yakin ingin menghapus kompetensi "${compToDelete?.title || ''}"?`}
+        confirmLabel="Hapus Kompetensi"
+        onConfirm={() => {
+          if (compToDelete) {
+            deleteCompetency(compToDelete.id);
+            setCompToDelete(null);
+          }
+        }}
+      />
 
       {/* Manage Competency Dialog */}
       <Dialog open={isManageCompOpen} onOpenChange={setIsManageCompOpen}>
         <DialogHeader>
           <DialogTitle>Kelola Kompetensi</DialogTitle>
         </DialogHeader>
-        <DialogContent className="">
+        <DialogContent>
           {activeCompForManage && competencies.find(c => c.id === activeCompForManage) && (
             <div className="space-y-6">
-              <div className="space-y-2">
-                <h4 className="font-semibold text-gray-900">{competencies.find(c => c.id === activeCompForManage)?.title}</h4>
+              <div className="space-y-1.5">
+                <h4 className="font-semibold text-gray-900 font-display">{competencies.find(c => c.id === activeCompForManage)?.title}</h4>
                 <p className="text-xs text-gray-500">Tautkan buku dan hasil tulisan untuk membuktikan bahwa Anda telah menguasai kompetensi ini.</p>
               </div>
 
@@ -491,9 +533,14 @@ export function PathDetailPage() {
                 </h5>
                 <div className="flex flex-col gap-2">
                   {competencies.find(c => c.id === activeCompForManage)?.bookIds.map(bid => (
-                    <div key={bid} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded border border-gray-200">
+                    <div key={bid} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-xl border border-gray-200">
                       <span className="text-sm text-gray-700 truncate">{getBookTitle(bid)}</span>
-                      <button onClick={() => handleRemoveBookFromComp(activeCompForManage, bid)} className="text-gray-500 hover:bg-gray-50 p-1 rounded">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBookFromComp(activeCompForManage, bid)}
+                        aria-label="Hapus buku terkait"
+                        className="text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg transition-colors"
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -501,11 +548,11 @@ export function PathDetailPage() {
                   {competencies.find(c => c.id === activeCompForManage)?.bookIds.length === 0 && (
                     <p className="text-xs text-gray-400 italic">Belum ada buku tertaut.</p>
                   )}
-                  <div className="flex gap-2 mt-2">
+                  <div className="flex flex-col sm:flex-row gap-2 mt-2">
                     <select 
                       value={manageSelectedBook}
                       onChange={(e) => setManageSelectedBook(e.target.value)}
-                      className="flex-1 rounded-md border border-gray-200 text-sm px-2 py-1 outline-none focus:ring-1 focus:ring-gray-900"
+                      className="flex-1 h-11 md:h-9 rounded-xl border border-gray-200 bg-white text-sm px-3 outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900"
                     >
                       <option value="">-- Pilih Buku --</option>
                       {books.map(b => (
@@ -525,9 +572,14 @@ export function PathDetailPage() {
                 </h5>
                 <div className="flex flex-col gap-2">
                   {competencies.find(c => c.id === activeCompForManage)?.outputIds.map(oid => (
-                    <div key={oid} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded border border-gray-200">
+                    <div key={oid} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-xl border border-gray-200">
                       <span className="text-sm text-gray-700 truncate">{getDraftTitle(oid)}</span>
-                      <button onClick={() => handleRemoveOutputFromComp(activeCompForManage, oid)} className="text-gray-500 hover:bg-gray-50 p-1 rounded">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveOutputFromComp(activeCompForManage, oid)}
+                        aria-label="Hapus tulisan terkait"
+                        className="text-gray-400 hover:text-gray-900 hover:bg-gray-200/50 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg transition-colors"
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -535,11 +587,11 @@ export function PathDetailPage() {
                   {competencies.find(c => c.id === activeCompForManage)?.outputIds.length === 0 && (
                     <p className="text-xs text-gray-400 italic">Belum ada hasil tulisan tertaut.</p>
                   )}
-                  <div className="flex gap-2 mt-2">
+                  <div className="flex flex-col sm:flex-row gap-2 mt-2">
                     <select 
                       value={manageSelectedOutput}
                       onChange={(e) => setManageSelectedOutput(e.target.value)}
-                      className="flex-1 rounded-md border border-gray-200 text-sm px-2 py-1 outline-none focus:ring-1 focus:ring-gray-900"
+                      className="flex-1 h-11 md:h-9 rounded-xl border border-gray-200 bg-white text-sm px-3 outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900"
                     >
                       <option value="">-- Pilih Hasil Tulisan --</option>
                       {drafts.map(d => (

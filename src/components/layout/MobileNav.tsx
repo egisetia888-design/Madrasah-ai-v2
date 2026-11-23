@@ -14,8 +14,8 @@ const workspaceItems = [
   { name: "Pustaka", href: "/library", icon: Library },
   { name: "Catatan", href: "/notes", icon: FileText },
   { name: "Konsep", href: "/concepts", icon: BrainCircuit },
-  { name: "Graf Analisa", href: "/graph", icon: Network },
-  { name: "Review", href: "/review", icon: Brain },
+  { name: "Graf Pengetahuan", href: "/graph", icon: Network },
+  { name: "Ulasan", href: "/review", icon: Brain },
   { name: "Tulisan", href: "/writing", icon: PenTool },
   { name: "Proyek", href: "/projects", icon: Briefcase },
   { name: "Kurikulum", href: "/curriculum", icon: Map },
@@ -39,6 +39,7 @@ export function MobileNav() {
 
   const notes = useNotesStore(state => state.notes)
   const drafts = useWritingStore(state => state.drafts)
+  const workspaceName = useAuthStore(state => state.workspaceName)
 
   const recentItems = [
     ...notes.slice(0, 3).map(n => ({ id: n.id, title: n.title, type: 'note' as const, date: n.updatedAt })),
@@ -106,7 +107,7 @@ export function MobileNav() {
                     <h2 className="text-lg font-bold text-gray-900 tracking-tight font-display">Madrasah</h2>
                     <GlobalSyncBadge compact />
                   </div>
-                  <p className="text-xs text-gray-500">Personal Knowledge OS</p>
+                  <p className="text-xs text-gray-500 truncate max-w-[160px]">{workspaceName}</p>
                 </div>
               </div>
               
@@ -191,22 +192,26 @@ export function MobileNav() {
                 </div>
                 <div className="divide-y divide-gray-50">
                   {recentItems.map((item) => (
-                    <button
-                      key={`${item.type}-${item.id}`}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        navigate(item.type === 'note' ? `/notes/${item.id}` : `/writing/${item.id}`)
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-3 min-h-[44px] text-left hover:bg-gray-50 transition-colors group"
-                    >
-                      <div className="w-2 h-2 rounded-full bg-gray-400 shrink-0 group-hover:bg-gray-900 transition-colors" />
-                      <span className="text-sm font-medium text-gray-700 truncate group-hover:text-gray-900">
-                        {item.title}
-                      </span>
-                      <span className="text-[10px] text-gray-400 uppercase font-mono ml-auto shrink-0">
-                        {item.type === 'note' ? 'Catatan' : 'Tulisan'}
-                      </span>
-                    </button>
+                      <button
+                        key={`${item.type}-${item.id}`}
+                        onClick={() => {
+                          setMenuOpen(false)
+                          navigate(item.type === 'note' ? `/notes/${item.id}` : `/writing/${item.id}`)
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 min-h-[44px] text-left hover:bg-gray-50 transition-colors group"
+                      >
+                        {item.type === 'note' ? (
+                          <FileText className="w-4 h-4 text-gray-400 shrink-0 group-hover:text-gray-900 transition-colors" />
+                        ) : (
+                          <PenTool className="w-4 h-4 text-gray-400 shrink-0 group-hover:text-gray-900 transition-colors" />
+                        )}
+                        <span className="text-sm font-medium text-gray-700 truncate group-hover:text-gray-900">
+                          {item.title}
+                        </span>
+                        <span className="text-[11px] text-gray-400 font-mono ml-auto shrink-0">
+                          {item.type === 'note' ? 'Catatan' : 'Tulisan'}
+                        </span>
+                      </button>
                   ))}
                 </div>
               </div>
@@ -232,7 +237,7 @@ export function MobileNav() {
                   <div className="w-9 h-9 rounded-xl bg-gray-100 text-gray-600 flex items-center justify-center shrink-0">
                     <BarChart2 className="w-4 h-4" strokeWidth={2} />
                   </div>
-                  <span className="text-sm font-medium text-gray-700">Analitik & Aktivitas</span>
+                  <span className="text-sm font-medium text-gray-700">Analitik</span>
                 </NavLink>
 
                 <NavLink
@@ -248,7 +253,7 @@ export function MobileNav() {
                   <div className="w-9 h-9 rounded-xl bg-gray-100 text-gray-600 flex items-center justify-center shrink-0">
                     <Settings className="w-4 h-4" strokeWidth={2} />
                   </div>
-                  <span className="text-sm font-medium text-gray-700">Pengaturan Workspace</span>
+                  <span className="text-sm font-medium text-gray-700">Pengaturan</span>
                 </NavLink>
 
                 <button
@@ -294,7 +299,7 @@ export function MobileNav() {
                   <div className="w-9 h-9 rounded-xl bg-gray-100 text-gray-600 flex items-center justify-center shrink-0">
                     <LogOut className="w-4 h-4" strokeWidth={2} />
                   </div>
-                  <span className="text-sm font-medium text-gray-700">Keluar (Logout)</span>
+                  <span className="text-sm font-medium text-gray-700">Keluar ke Layar Awal</span>
                 </button>
               </div>
             </div>

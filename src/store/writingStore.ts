@@ -4,7 +4,6 @@ import { Draft } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
 import { SyncMetadata } from '../types';
 import { generateEmbedding } from '../lib/semanticSearch';
-import { syncSaveDraft, syncDeleteDraft } from '../lib/firestoreSync';
 import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface WritingState {
@@ -37,29 +36,21 @@ export const useWritingStore = create<WritingState>()(
         set((state) => ({
           drafts: [newDraft, ...state.drafts]
         }));
-        syncSaveDraft(newDraft);
         return id;
       },
       
       updateDraft: (id, draftData) => {
-        set((state) => {
-          const updatedDrafts = state.drafts.map(d => {
-            if (d.id === id) {
-              const updated = { ...d, ...draftData, ...updateSyncMetadata(d) };
-              syncSaveDraft(updated);
-              return updated;
-            }
-            return d;
-          });
-          return { drafts: updatedDrafts };
-        });
+        set((state) => ({
+          drafts: state.drafts.map(d =>
+            d.id === id ? { ...d, ...draftData, ...updateSyncMetadata(d) } : d
+          )
+        }));
       },
       
       deleteDraft: (id) => {
         set((state) => ({
           drafts: state.drafts.filter(d => d.id !== id)
         }));
-        syncDeleteDraft(id);
       },
 
       indexDraft: async (id) => {
@@ -72,14 +63,9 @@ export const useWritingStore = create<WritingState>()(
           const embedding = await generateEmbedding(textToEmbed);
           
           set((state) => ({
-            drafts: state.drafts.map(d => {
-              if (d.id === id) {
-                const updated = { ...d, embedding };
-                syncSaveDraft(updated);
-                return updated;
-              }
-              return d;
-            })
+            drafts: state.drafts.map(d =>
+              d.id === id ? { ...d, embedding } : d
+            )
           }));
         } catch (error) {
           console.error('Failed to index draft:', error);

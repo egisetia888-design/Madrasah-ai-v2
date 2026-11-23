@@ -129,9 +129,10 @@ export function PublishWebhookModal({ isOpen, onClose, draft }: PublishWebhookMo
             {draft.content.substring(0, 160)}...
           </p>
           {draft.tags && draft.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-1">
-              {draft.tags.map((t) => (
-                <span key={t} className="text-[10px] bg-white border border-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-mono">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-[11px] font-mono text-gray-500">
+              {draft.tags.map((t, idx) => (
+                <span key={t}>
+                  {idx > 0 && <span className="mr-2 text-gray-300">·</span>}
                   #{t}
                 </span>
               ))}

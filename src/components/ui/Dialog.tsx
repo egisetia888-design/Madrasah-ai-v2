@@ -21,7 +21,7 @@ export function Dialog({ open, onOpenChange, children, maxWidthClass = "max-w-lg
       <div className={cn(`relative z-[100] w-full bg-white rounded-2xl shadow-2xl border border-gray-100 animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90dvh] overflow-hidden`, maxWidthClass)}>
         <button
           onClick={() => onOpenChange(false)}
-          className="absolute right-4 top-4 rounded-lg p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition-colors cursor-pointer z-[100]"
+          className="absolute right-2.5 top-2.5 sm:right-4 sm:top-4 rounded-xl min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition-colors cursor-pointer z-[100]"
           aria-label="Tutup"
         >
           <X className="w-4 h-4" />

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react"
-import { fetchWithAuth } from "../../lib/api"
+import { fetchWithAuth, prepareSuggestTagsPayload, prepareZettelkastenPayload } from "../../lib/api"
 import { Button } from "../../components/ui/Button"
 import { Plus, Sparkles, Filter, Zap, Search } from "lucide-react"
 import { useNotesStore } from "../../store/notesStore"
@@ -13,6 +13,7 @@ import { NotesGrid } from "./components/NotesGrid"
 import { AddNoteDialog } from "./components/AddNoteDialog"
 import { AddFolderDialog } from "./components/AddFolderDialog"
 import { AIAssistantDialog } from "./components/AIAssistantDialog"
+import { PageHeader } from "../../components/ui/PageHeader"
 
 export function NotesPage() {
   const notes = useNotesStore(state => state.notes)
@@ -125,12 +126,12 @@ export function NotesPage() {
     if (linkedCount > 0) {
       addToast({
         type: 'success',
-        message: `Catatan disimpan & ${linkedCount} relasi otomatis ditautkan ke Knowledge Graph!`
+        message: `Catatan disimpan dan ${linkedCount} relasi ditautkan ke Graf Pengetahuan.`
       });
     } else {
       addToast({
         type: 'success',
-        message: `Catatan berhasil disimpan ke Otak Kedua!`
+        message: `Catatan berhasil disimpan.`
       });
     }
 
@@ -192,7 +193,7 @@ export function NotesPage() {
       const res = await fetchWithAuth("/api/ai/suggest-tags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, notes, concepts }),
+        body: JSON.stringify(prepareSuggestTagsPayload(content, notes, concepts)),
       });
       const data = await res.json();
       if (res.ok) {
@@ -231,7 +232,7 @@ export function NotesPage() {
       const res = await fetchWithAuth("/api/ai/zettelkasten", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, notes, concepts, fragments: sourceFragments, relations }),
+        body: JSON.stringify(prepareZettelkastenPayload(prompt, notes, concepts, sourceFragments, relations)),
       });
 
       const data = await res.json();
@@ -252,34 +253,35 @@ export function NotesPage() {
   }
 
   return (
-    <div className="flex flex-col h-full animate-in fade-in duration-500 w-full min-w-0 max-w-7xl mx-auto pb-20">
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 font-display">Knowledge Database</h1>
-          <p className="text-gray-500 mt-0.5 text-xs sm:text-sm">Zettelkasten & Catatan Pembelajaran Anda</p>
-        </div>
-        <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
-          <Button
-            variant="outline"
-            className="gap-2 h-11 sm:h-9 text-gray-900 border-gray-300 hover:bg-gray-100 rounded-xl"
-            onClick={handleGlobalAutoLink}
-            disabled={isAutoLinking}
-            title="Pindai seluruh catatan dan tautkan entitas secara otomatis ke Knowledge Graph"
-          >
-            <Zap className={cn("w-4 h-4 text-gray-900", isAutoLinking && "animate-spin")} />
-            <span className="hidden sm:inline">{isAutoLinking ? "Menautkan..." : "Tautkan Otomatis"}</span>
-            <span className="sm:hidden">{isAutoLinking ? "..." : "Auto-Link"}</span>
-          </Button>
-          <Button variant="outline" className="gap-2 h-11 sm:h-9 rounded-xl" onClick={() => setIsAssistantOpen(true)}>
-            <Sparkles className="w-4 h-4 text-gray-500" />
-            <span>Tanya AI</span>
-          </Button>
-          <Button className="gap-2 h-11 sm:h-9 col-span-2 sm:col-span-1 rounded-xl" onClick={() => setIsAddOpen(true)}>
-            <Plus className="w-4 h-4" />
-            <span>Catatan Baru</span>
-          </Button>
-        </div>
-      </div>
+    <div className="flex flex-col h-full animate-in fade-in duration-500 w-full min-w-0 pb-20">
+      <PageHeader
+        title="Basis Pengetahuan"
+        description="Zettelkasten dan catatan pembelajaran terhubung Anda."
+        className="mb-6"
+        actions={
+          <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
+            <Button
+              variant="outline"
+              className="gap-2 text-gray-900 border-gray-300 hover:bg-gray-100"
+              onClick={handleGlobalAutoLink}
+              disabled={isAutoLinking}
+              title="Pindai seluruh catatan dan tautkan entitas secara otomatis ke Graf Pengetahuan"
+            >
+              <Zap className={cn("w-4 h-4 text-gray-900", isAutoLinking && "animate-spin")} />
+              <span className="hidden sm:inline">{isAutoLinking ? "Menautkan..." : "Tautkan Otomatis"}</span>
+              <span className="sm:hidden">{isAutoLinking ? "Memindai..." : "Tautkan"}</span>
+            </Button>
+            <Button variant="outline" className="gap-2" onClick={() => setIsAssistantOpen(true)}>
+              <Sparkles className="w-4 h-4 text-gray-500" />
+              <span>Tanya AI</span>
+            </Button>
+            <Button className="gap-2 col-span-2 sm:col-span-1" onClick={() => setIsAddOpen(true)}>
+              <Plus className="w-4 h-4" />
+              <span>Catatan Baru</span>
+            </Button>
+          </div>
+        }
+      />
 
       {/* Quick Mobile Search & Category Tabs */}
       <div className="lg:hidden mb-4 space-y-2.5">
@@ -290,7 +292,7 @@ export function NotesPage() {
             placeholder="Cari catatan..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-1 focus:ring-gray-300 outline-none shadow-2xs placeholder:text-gray-400"
+            className="w-full h-11 pl-9 pr-3 bg-white border border-gray-200 rounded-xl text-sm focus:ring-1 focus:ring-gray-300 outline-none placeholder:text-gray-400"
           />
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto w-full no-scrollbar py-1 scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0">
@@ -301,10 +303,11 @@ export function NotesPage() {
             { id: 'permanent', label: 'Permanen' }
           ].map(tab => (
             <button
+              type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
               className={cn(
-                "px-3.5 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
+                "px-3.5 min-h-[44px] sm:min-h-0 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
                 activeTab === tab.id
                   ? "bg-gray-900 text-white shadow-sm font-semibold"
                   : "bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50"
@@ -318,7 +321,7 @@ export function NotesPage() {
 
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Mobile Filter Toggle */}
-        <div className="lg:hidden flex items-center justify-between bg-white border border-gray-200 rounded-2xl p-3.5 shadow-sm">
+        <div className="lg:hidden flex items-center justify-between bg-white border border-gray-200 rounded-2xl px-4 py-2 shadow-sm">
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
             <Filter className="w-4 h-4 text-gray-500" />
             <span>Filter Folder & Tag</span>
@@ -328,7 +331,7 @@ export function NotesPage() {
             variant="outline"
             size="sm"
             onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)}
-            className="h-8 px-3 text-xs font-semibold rounded-xl"
+            className="px-3 text-xs font-semibold"
           >
             {mobileFiltersOpen ? "Tutup" : "Buka Filter"}
           </Button>

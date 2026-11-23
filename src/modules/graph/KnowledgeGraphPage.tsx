@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useMemo } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Button } from "../../components/ui/Button"
-import { Search, Network, Maximize, List, Book, FileText, Briefcase, PenTool, Hash, X, ArrowRight, User, Sparkles, Zap, RefreshCw, CheckCircle2 } from "lucide-react"
+import { PageHeader } from "../../components/ui/PageHeader"
+import { MetadataRow } from "../../components/ui/MetadataRow"
+import { Search, Network, Maximize, List, Book, FileText, Briefcase, PenTool, Hash, X, ArrowRight, User, Sparkles } from "lucide-react"
 import * as d3 from "d3"
 import { useKnowledgeGraph } from "../../hooks/useKnowledgeGraph"
 import { useNotesStore } from "../../store/notesStore"
@@ -10,13 +12,26 @@ import { useProjectsStore } from "../../store/projectsStore"
 import { useLibraryStore } from "../../store/libraryStore"
 import { useKnowledgeStore } from "../../store/knowledgeStore"
 import { useToastStore } from "../../store/toastStore"
-import { runAutoLinker, getAutoLinkedRelationsForEntity, autoLinkSingleEntity } from "../../utils/autoLinker"
+import { runAutoLinker, autoLinkSingleEntity } from "../../utils/autoLinker"
 import { cn } from "../../utils/cn"
 import { MarkdownRenderer } from "../../components/ui/MarkdownRenderer"
 
 import { ProvenanceBadge } from "../../components/ui/ProvenanceBadge"
 
 import { ErrorBoundary } from "../../components/ErrorBoundary"
+
+function getNodeTypeLabel(type: string): string {
+  switch (type) {
+    case 'note': return 'Catatan';
+    case 'writing': return 'Tulisan';
+    case 'project': return 'Proyek';
+    case 'concept': return 'Konsep';
+    case 'book': return 'Pustaka';
+    case 'author': return 'Penulis';
+    case 'source_fragment': return 'Fragmen Sumber';
+    default: return type;
+  }
+}
 
 export function KnowledgeGraphPage() {
   const navigate = useNavigate()
@@ -429,44 +444,61 @@ export function KnowledgeGraphPage() {
 
   return (
     <ErrorBoundary fallbackMessage="Gagal merender Graf Pengetahuan — coba gunakan Filter Tipe Simpul untuk mengurangi jumlah data.">
-      <div className="flex flex-col h-[calc(100vh-13rem)] md:h-[calc(100vh-8rem)] min-h-[460px] md:min-h-[600px] animate-in fade-in duration-500 w-full min-w-0 max-w-7xl mx-auto pb-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between shrink-0 mb-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 font-display">Knowledge Graph</h1>
-          <p className="text-gray-500 mt-0.5 text-xs sm:text-sm">Visualisasi & penautan otomatis antar catatan, konsep, dan pustaka.</p>
-        </div>
-        
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-          <Button 
-            variant="outline" 
-            onClick={handleRunAutoLinker} 
-            disabled={isLinking}
-            className="gap-2 h-9 border-gray-300 text-gray-900 hover:bg-gray-100 font-medium"
-            title="Pindai dan tautkan otomatis seluruh relasi pengetahuan"
-          >
-            <Sparkles className={cn("w-4 h-4 text-gray-900", isLinking && "animate-spin")} />
-            <span>{isLinking ? "Menautkan..." : "Tautkan Otomatis"}</span>
-          </Button>
+      <div className="flex flex-col h-[calc(100dvh-12rem)] md:h-[calc(100dvh-7rem)] min-h-[460px] md:min-h-[600px] animate-in fade-in duration-500 w-full min-w-0 pb-4">
+      <PageHeader
+        title="Graf Pengetahuan"
+        description="Visualisasi dan penautan otomatis antar catatan, konsep, dan pustaka."
+        className="shrink-0 mb-4"
+        actions={
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={handleRunAutoLinker}
+              disabled={isLinking}
+              className="gap-2 border-gray-300 text-gray-900 hover:bg-gray-100 font-medium"
+              title="Pindai dan tautkan otomatis seluruh relasi pengetahuan"
+            >
+              <Sparkles className={cn("w-4 h-4 text-gray-900", isLinking && "animate-spin")} />
+              <span>{isLinking ? "Menautkan..." : "Tautkan Otomatis"}</span>
+            </Button>
 
-          <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
-            <button onClick={() => setViewMode('graph')} className={cn("p-1.5 rounded-lg transition-colors", viewMode === 'graph' ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700')}>
-               <Network className="w-4 h-4" />
-            </button>
-            <button onClick={() => setViewMode('list')} className={cn("p-1.5 rounded-lg transition-colors", viewMode === 'list' ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700')}>
-               <List className="w-4 h-4" />
-            </button>
+            <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
+              <button
+                type="button"
+                onClick={() => setViewMode('graph')}
+                aria-label="Tampilan Graf"
+                title="Tampilan Graf"
+                className={cn(
+                  "min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 flex items-center justify-center rounded-lg transition-colors cursor-pointer",
+                  viewMode === 'graph' ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <Network className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                aria-label="Tampilan Daftar"
+                title="Tampilan Daftar"
+                className={cn(
+                  "min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 flex items-center justify-center rounded-lg transition-colors cursor-pointer",
+                  viewMode === 'list' ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
+            <Button variant="outline" className="gap-2 shrink-0" onClick={() => {
+              if (wrapperRef.current?.requestFullscreen) {
+                wrapperRef.current.requestFullscreen();
+              }
+            }}>
+              <Maximize className="w-4 h-4" />
+              <span className="hidden sm:inline">Layar Penuh</span>
+            </Button>
           </div>
-          <Button variant="outline" className="gap-2 shrink-0 h-9" onClick={() => {
-            if (wrapperRef.current?.requestFullscreen) {
-              wrapperRef.current.requestFullscreen();
-            }
-          }}>
-            <Maximize className="w-4 h-4" />
-            <span className="hidden sm:inline">Layar Penuh</span>
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Main Content Area */}
       <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
@@ -551,19 +583,10 @@ export function KnowledgeGraphPage() {
                             {getTypeIcon(node.type)}
                             {node.label}
                           </td>
-                          <td className="px-6 py-4">
-                            <span className={cn(
-                              "px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider rounded-md",
-                              node.type === 'concept' ? 'bg-gray-100 text-gray-800' :
-                              node.type === 'book' ? 'bg-gray-100 text-gray-800' :
-                              node.type === 'note' ? 'bg-gray-100 text-gray-800' :
-                              node.type === 'author' ? 'bg-gray-100 text-gray-800' :
-                              'bg-gray-100 text-gray-700'
-                            )}>
-                              {node.type}
-                            </span>
+                          <td className="px-6 py-4 text-xs font-mono text-gray-600">
+                            {getNodeTypeLabel(node.type)}
                           </td>
-                          <td className="px-6 py-4 text-gray-500">
+                          <td className="px-6 py-4 text-gray-500 font-mono tabular-nums text-xs">
                             {connections} relasi
                           </td>
                         </tr>
@@ -581,15 +604,20 @@ export function KnowledgeGraphPage() {
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 {getTypeIcon(selectedNode.type)}
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{selectedNode.type}</span>
+                <span className="text-xs font-semibold font-mono text-gray-500 uppercase tracking-wider">{getNodeTypeLabel(selectedNode.type)}</span>
               </div>
-              <button onClick={() => setSelectedNodeId(null)} className="p-1.5 text-gray-400 hover:text-gray-900 rounded-md hover:bg-gray-100 transition-colors">
+              <button
+                type="button"
+                onClick={() => setSelectedNodeId(null)}
+                aria-label="Tutup panel detail"
+                className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 flex items-center justify-center text-gray-400 hover:text-gray-900 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
             
             <div className="p-5 flex-1 overflow-y-auto">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">{selectedNode.label}</h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-4 font-display">{selectedNode.label}</h2>
               
               {nodeDetails && (nodeDetails as any).content && (
                 <div className="mb-6">
@@ -603,33 +631,35 @@ export function KnowledgeGraphPage() {
               {nodeDetails && (nodeDetails as any).description && (
                 <div className="mb-6">
                   <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Deskripsi</h3>
-                  <div className="text-sm text-gray-600">
+                  <div className="text-sm text-gray-600 leading-relaxed">
                     {((nodeDetails as any).description)}
                   </div>
                 </div>
               )}
 
               <div className="mb-6">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                <div className="flex items-center justify-between mb-3 gap-2">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider font-mono tabular-nums">
                     Relasi Terhubung ({selectedNodeConnections.length})
                   </h3>
-                  <button 
+                  <button
+                    type="button"
                     onClick={handleAutoLinkSelectedNode}
-                    className="text-xs text-gray-900 hover:text-black font-semibold flex items-center gap-1 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded-lg transition-colors"
-                    title="Pindai dan tautkan otomatis entitas yang disebut dalam node ini"
+                    className="text-xs text-gray-900 hover:text-black font-semibold flex items-center gap-1 bg-gray-100 hover:bg-gray-200 px-2.5 min-h-[36px] rounded-xl transition-colors cursor-pointer"
+                    title="Pindai dan tautkan otomatis entitas yang disebut dalam simpul ini"
                   >
                     <Sparkles className="w-3 h-3" />
-                    <span>Tautkan Node</span>
+                    <span>Tautkan</span>
                   </button>
                 </div>
 
                 {selectedNodeConnections.length === 0 ? (
                   <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 text-center">
                     <p className="text-xs text-gray-500">Belum ada relasi terdaftar.</p>
-                    <button 
+                    <button
+                      type="button"
                       onClick={handleAutoLinkSelectedNode}
-                      className="mt-2 text-xs font-semibold text-gray-900 underline"
+                      className="mt-2 text-xs font-semibold text-gray-900 underline cursor-pointer"
                     >
                       Pindai otomatis sekarang
                     </button>
@@ -637,37 +667,33 @@ export function KnowledgeGraphPage() {
                 ) : (
                   <div className="flex flex-col gap-2">
                     {selectedNodeConnections.slice(0, 10).map((conn, idx) => (
-                      <button 
-                        key={`${conn.node?.id}-${idx}`} 
-                        onClick={() => setSelectedNodeId(conn.node!.id)} 
-                        className="flex flex-col p-2.5 rounded-xl border border-gray-100 hover:border-gray-300 hover:bg-gray-50/70 transition-all text-left group bg-white shadow-2xs"
+                      <button
+                        type="button"
+                        key={`${conn.node?.id}-${idx}`}
+                        onClick={() => setSelectedNodeId(conn.node!.id)}
+                        className="flex flex-col p-3 rounded-xl border border-gray-100 hover:border-gray-300 hover:bg-gray-50/70 transition-all text-left group bg-white cursor-pointer"
                       >
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between w-full mb-1 gap-2">
+                        <div className="flex items-center justify-between w-full mb-1 gap-2">
                           <div className="flex items-center gap-2 min-w-0">
                             {getTypeIcon(conn.node!.type)}
                             <span className="text-sm text-gray-900 font-medium truncate group-hover:text-black">
                               {conn.node?.label}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className={cn(
-                              "px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-md shrink-0",
-                              conn.edgeLabel === 'contradicts' ? 'bg-gray-200 text-gray-900' :
-                              conn.edgeLabel === 'supports' ? 'bg-gray-200 text-gray-900' :
-                              'bg-gray-100 text-gray-700'
-                            )}>
-                              {conn.edgeLabel ? conn.edgeLabel.replace('_', ' ') : (conn.direction === 'outgoing' ? 'menautkan' : 'ditautkan')}
-                            </span>
-                            {conn.relation && <ProvenanceBadge relation={conn.relation} />}
-                          </div>
                         </div>
-                        <span className="text-[11px] text-gray-400 capitalize pl-6">
-                          Tipe: {conn.node?.type} ({conn.direction === 'outgoing' ? 'arah keluar' : 'arah masuk'})
-                        </span>
+                        <div className="pl-6 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <MetadataRow
+                            items={[
+                              getNodeTypeLabel(conn.node!.type),
+                              conn.edgeLabel ? conn.edgeLabel.replace('_', ' ') : (conn.direction === 'outgoing' ? 'arah keluar' : 'arah masuk'),
+                            ]}
+                          />
+                          {conn.relation && <ProvenanceBadge relation={conn.relation} />}
+                        </div>
                       </button>
                     ))}
                     {selectedNodeConnections.length > 10 && (
-                      <p className="text-xs text-gray-400 text-center pt-2">+{selectedNodeConnections.length - 10} relasi lainnya</p>
+                      <p className="text-xs text-gray-400 text-center pt-2 font-mono tabular-nums">+{selectedNodeConnections.length - 10} relasi lainnya</p>
                     )}
                   </div>
                 )}

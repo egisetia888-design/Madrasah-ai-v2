@@ -1,9 +1,12 @@
-import { SyncStatusIndicator } from '../../components/ui/SyncStatusIndicator';
 import { useState, useMemo } from "react";
-import { fetchWithAuth } from "../../lib/api";
+import { fetchWithAuth, prepareContentExcerpt } from "../../lib/api";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, BrainCircuit, Edit2, Trash2, Network, Sparkles, Zap, ArrowRight, CheckCircle2, Save, ChevronDown, Check } from "lucide-react";
+import { Plus, Search, BrainCircuit, Edit2, Trash2, Network, Sparkles, Zap, CheckCircle2, Save, ChevronDown } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { MetadataRow } from "../../components/ui/MetadataRow";
 import { Button } from "../../components/ui/Button";
 import { useKnowledgeStore } from "../../store/knowledgeStore";
 import { useToastStore } from "../../store/toastStore";
@@ -32,6 +35,7 @@ export function ConceptsPage() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isAutoLinking, setIsAutoLinking] = useState(false);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
+  const [conceptToDelete, setConceptToDelete] = useState<Concept | null>(null);
 
   // Form State
   const [name, setName] = useState("");
@@ -154,11 +158,11 @@ export function ConceptsPage() {
     setIsAddOpen(false);
   };
 
-  const getStatusColor = (status: ConceptEvolutionStatus) => {
+  const getEvolutionLabel = (status: ConceptEvolutionStatus) => {
     switch (status) {
-      case 'mastered': return 'bg-gray-900 text-white';
-      case 'defined': return 'bg-gray-100 text-gray-800 border border-gray-200';
-      default: return 'bg-gray-50 text-gray-600 border border-gray-200';
+      case 'mastered': return 'Dikuasai';
+      case 'defined': return 'Terdefinisi';
+      default: return 'Berkembang';
     }
   };
 
@@ -188,7 +192,7 @@ export function ConceptsPage() {
       const res = await fetchWithAuth("/api/ai/generate-flashcards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: selectedConceptForFc.name + "\n\n" + selectedConceptForFc.definition }),
+        body: JSON.stringify({ content: prepareContentExcerpt(selectedConceptForFc.name + "\n\n" + selectedConceptForFc.definition, 4800) }),
       });
       const data = await res.json();
       if (res.ok && data.flashcards) {
@@ -245,155 +249,162 @@ export function ConceptsPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 w-full min-w-0 pb-12">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 font-display flex items-center gap-2">
-            <BrainCircuit className="w-6 h-6 text-gray-900 shrink-0" />
-            <span>Konsep</span>
-          </h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">Kelola dan kembangkan unit pengetahuan abstrak secara otomatis tertaut.</p>
-        </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <Button
-            variant="outline"
-            onClick={handleGlobalAutoLink}
-            disabled={isAutoLinking}
-            className="flex-1 sm:flex-initial gap-2 h-11 sm:h-9 text-gray-900 border-gray-300 hover:bg-gray-100"
-          >
-            <Zap className={cn("w-4 h-4 text-gray-900", isAutoLinking && "animate-spin")} />
-            <span>{isAutoLinking ? "Menautkan..." : "Tautkan Otomatis"}</span>
-          </Button>
-          <Button onClick={handleOpenAdd} className="flex-1 sm:flex-initial gap-2 shrink-0 h-11 sm:h-9">
-            <Plus className="w-4 h-4" />
-            <span>Konsep Baru</span>
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Konsep"
+        description="Kelola dan kembangkan unit pengetahuan abstrak yang terhubung otomatis."
+        icon={<BrainCircuit className="w-6 h-6 text-gray-900 shrink-0" />}
+        actions={
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Button
+              variant="outline"
+              onClick={handleGlobalAutoLink}
+              disabled={isAutoLinking}
+              className="flex-1 sm:flex-initial gap-2 text-gray-900 border-gray-300 hover:bg-gray-100"
+            >
+              <Zap className={cn("w-4 h-4 text-gray-900", isAutoLinking && "animate-spin")} />
+              <span>{isAutoLinking ? "Menautkan..." : "Tautkan Otomatis"}</span>
+            </Button>
+            <Button onClick={handleOpenAdd} className="flex-1 sm:flex-initial gap-2 shrink-0">
+              <Plus className="w-4 h-4" />
+              <span>Konsep Baru</span>
+            </Button>
+          </div>
+        }
+      />
 
       {/* Search and Filters */}
-      <div className="mb-6 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
         <div className="relative flex-1">
-          <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             placeholder="Cari konsep, definisi, atau alias..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 text-sm"
+            className="w-full h-11 pl-9 pr-4 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 text-sm"
           />
         </div>
         <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl shrink-0 text-xs font-medium">
           <button
+            type="button"
             onClick={() => setFilterVerifiedOnly(false)}
             className={cn(
-              "px-3 py-1.5 rounded-lg transition-colors",
+              "px-3 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg transition-colors cursor-pointer",
               !filterVerifiedOnly ? "bg-white text-gray-900 shadow-xs font-semibold" : "text-gray-600 hover:text-gray-900"
             )}
           >
-            Semua ({concepts.length})
+            Semua (<span className="font-mono tabular-nums">{concepts.length}</span>)
           </button>
           <button
+            type="button"
             onClick={() => setFilterVerifiedOnly(true)}
             className={cn(
-              "px-3 py-1.5 rounded-lg transition-colors",
+              "px-3 min-h-[44px] sm:min-h-0 py-1.5 rounded-lg transition-colors cursor-pointer",
               filterVerifiedOnly ? "bg-white text-gray-900 shadow-xs font-semibold" : "text-gray-600 hover:text-gray-900"
             )}
           >
-            Hanya Terverifikasi Manual
+            Terverifikasi Manual
           </button>
         </div>
       </div>
 
       {/* Grid */}
       {filteredConcepts.length === 0 ? (
-        <div className="text-center py-16 bg-white border border-gray-100 rounded-2xl">
-          <BrainCircuit className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-1">Belum ada konsep</h3>
-          <p className="text-sm text-gray-500 mb-4">Mulai bangun abstraksi pengetahuan Anda.</p>
-          <Button onClick={handleOpenAdd} variant="outline">
-            Buat Konsep Pertama
-          </Button>
-        </div>
+        <EmptyState
+          icon={BrainCircuit}
+          title={concepts.length === 0 ? "Belum ada konsep" : "Konsep tidak ditemukan"}
+          description={
+            concepts.length === 0
+              ? "Mulai bangun unit pengetahuan abstrak Anda agar mudah ditautkan antar catatan."
+              : "Tidak ada konsep yang sesuai dengan kata kunci atau filter saat ini."
+          }
+          action={
+            concepts.length === 0 ? (
+              <Button onClick={handleOpenAdd} className="gap-2">
+                <Plus className="w-4 h-4" />
+                Buat Konsep Pertama
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredConcepts.map(concept => {
-            const relCount = relations.filter(r => r.sourceNodeId === concept.id || r.targetNodeId === concept.id).length;
+            const conceptRels = relations.filter(r => r.sourceNodeId === concept.id || r.targetNodeId === concept.id);
+            const relCount = conceptRels.length;
+            const unverifiedRels = conceptRels.filter(r => r.createdBy === 'ai_agent' && !r.verifiedBySystem);
+
             return (
-              <div key={concept.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow group relative flex flex-col h-full">
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex flex-col gap-1">
-                    <h3 className="font-semibold text-gray-900 line-clamp-1">{concept.name}</h3>
-                    {concept.epistemicDomain && concept.epistemicDomain !== 'umum' && (
-                      <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-500">
-                        Domain: {concept.epistemicDomain}
-                      </span>
-                    )}
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getStatusColor(concept.evolutionStatus)}`}>
-                    {concept.evolutionStatus}
-                  </span>
+              <div key={concept.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md transition-all group relative flex flex-col h-full">
+                <div className="mb-3 space-y-1">
+                  <h3 className="font-semibold text-base text-gray-900 line-clamp-1 font-display">{concept.name}</h3>
+                  <MetadataRow
+                    items={[
+                      <span className={concept.evolutionStatus === 'mastered' ? "text-gray-900 font-semibold" : "text-gray-500"}>
+                        {getEvolutionLabel(concept.evolutionStatus)}
+                      </span>,
+                      concept.epistemicDomain && concept.epistemicDomain !== 'umum'
+                        ? concept.epistemicDomain.charAt(0).toUpperCase() + concept.epistemicDomain.slice(1)
+                        : null,
+                    ]}
+                  />
                 </div>
-                <p className="text-sm text-gray-600 line-clamp-3 mb-4 flex-1">
-                  {concept.definition || <span className="italic text-gray-400">Belum ada definisi.</span>}
+
+                <p className="text-sm text-gray-600 line-clamp-3 mb-4 flex-1 leading-relaxed">
+                  {concept.definition || <span className="text-gray-400">Belum ada definisi.</span>}
                 </p>
+
                 {concept.aliases.length > 0 && (
-                  <div className="mb-4 flex flex-wrap gap-1">
-                    {concept.aliases.map(alias => (
-                      <span key={alias} className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-                        {alias}
-                      </span>
-                    ))}
-                  </div>
+                  <p className="mb-3 text-xs font-mono text-gray-500 truncate">
+                    Alias: {concept.aliases.join(' · ')}
+                  </p>
                 )}
 
                 {/* Provenance Status of Concept Relations */}
-                {(() => {
-                  const conceptRels = relations.filter(r => r.sourceNodeId === concept.id || r.targetNodeId === concept.id);
-                  const unverifiedRels = conceptRels.filter(r => r.createdBy === 'ai_agent' && !r.verifiedBySystem);
-                  if (unverifiedRels.length > 0) {
-                    return (
-                      <div className="mb-3 pt-2 border-t border-gray-100 flex flex-wrap items-center gap-1.5">
-                        <span className="text-[10px] font-mono text-gray-500">Relasi AI:</span>
-                        {unverifiedRels.slice(0, 2).map(r => (
-                          <ProvenanceBadge key={r.id} relation={r} />
-                        ))}
-                        {unverifiedRels.length > 2 && (
-                          <span className="text-[10px] text-gray-400 font-mono">+{unverifiedRels.length - 2}</span>
-                        )}
-                      </div>
-                    );
-                  } else if (conceptRels.length > 0) {
-                    return (
-                      <div className="mb-3 pt-2 border-t border-gray-100 flex items-center gap-1.5">
-                        <ProvenanceBadge relation={conceptRels[0]} />
-                        {conceptRels.length > 1 && (
-                          <span className="text-[10px] text-gray-400 font-mono">+{conceptRels.length - 1} relasi</span>
-                        )}
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
+                {unverifiedRels.length > 0 ? (
+                  <div className="mb-3 pt-2.5 border-t border-gray-100 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-mono text-gray-500">Relasi AI:</span>
+                    {unverifiedRels.slice(0, 2).map(r => (
+                      <ProvenanceBadge key={r.id} relation={r} />
+                    ))}
+                    {unverifiedRels.length > 2 && (
+                      <span className="text-[11px] text-gray-400 font-mono tabular-nums">+{unverifiedRels.length - 2}</span>
+                    )}
+                  </div>
+                ) : conceptRels.length > 0 ? (
+                  <div className="mb-3 pt-2.5 border-t border-gray-100 flex items-center gap-1.5">
+                    <ProvenanceBadge relation={conceptRels[0]} />
+                    {conceptRels.length > 1 && (
+                      <span className="text-[11px] text-gray-400 font-mono tabular-nums">+{conceptRels.length - 1} relasi</span>
+                    )}
+                  </div>
+                ) : null}
 
-                <div className="flex items-center justify-between pt-3 border-t border-gray-50 text-xs text-gray-500">
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-100 text-xs text-gray-500">
                   <button
+                    type="button"
                     onClick={() => navigate(`/graph?search=${encodeURIComponent(concept.name)}`)}
-                    className="flex items-center gap-1.5 font-medium hover:text-gray-900 transition-colors"
+                    className="flex items-center gap-1.5 font-medium font-mono tabular-nums hover:text-gray-900 transition-colors min-h-[44px] sm:min-h-0 cursor-pointer"
                   >
                     <Network className="w-3.5 h-3.5 text-gray-900" />
                     <span>{relCount} relasi</span>
                   </button>
 
-                  <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button variant="outline" size="sm" onClick={() => handleOpenFlashcardModal(concept)} className="py-1 h-auto text-xs">
-                      <BrainCircuit className="w-3 h-3 mr-1" /> Flashcard
+                  <div className="flex items-center gap-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <Button variant="outline" size="sm" onClick={() => handleOpenFlashcardModal(concept)} className="text-xs px-2.5">
+                      <BrainCircuit className="w-3.5 h-3.5 mr-1" /> Flashcard
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => handleOpenEdit(concept)} className="py-1 h-auto text-xs">
-                      <Edit2 className="w-3 h-3 mr-1" /> Edit
+                    <Button variant="outline" size="sm" onClick={() => handleOpenEdit(concept)} className="text-xs px-2.5">
+                      <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => deleteConcept(concept.id)} className="px-2 h-auto text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200">
-                      <Trash2 className="w-3 h-3" />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setConceptToDelete(concept)}
+                      aria-label={`Hapus konsep ${concept.name}`}
+                      className="px-2.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 border-gray-200"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -614,6 +625,26 @@ export function ConceptsPage() {
           )}
         </DialogFooter>
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(conceptToDelete)}
+        onOpenChange={(open) => {
+          if (!open) setConceptToDelete(null);
+        }}
+        title="Hapus Konsep?"
+        description={
+          <span>
+            Konsep <strong className="text-gray-900">{conceptToDelete?.name}</strong> beserta definisinya akan dihapus secara permanen dari ruang kerja lokal Anda.
+          </span>
+        }
+        onConfirm={() => {
+          if (conceptToDelete) {
+            deleteConcept(conceptToDelete.id);
+            addToast({ type: 'info', message: `Konsep "${conceptToDelete.name}" dihapus.` });
+            setConceptToDelete(null);
+          }
+        }}
+      />
     </div>
   );
 }

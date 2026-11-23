@@ -1,100 +1,76 @@
 import { create } from 'zustand';
-import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
-import { auth, googleProvider, isFirebaseConfigured } from '../lib/firebase';
+
+const AUTH_STORAGE_KEY = 'madrasah_auth';
+const WORKSPACE_NAME_KEY = 'madrasah_workspace_name';
+
+function readInitialEntered(): boolean {
+  if (typeof window === 'undefined') return true;
+  return window.localStorage.getItem(AUTH_STORAGE_KEY) === 'true';
+}
+
+function readInitialWorkspaceName(): string {
+  if (typeof window === 'undefined') return 'Ruang Belajar Pribadi';
+  return window.localStorage.getItem(WORKSPACE_NAME_KEY)?.trim() || 'Ruang Belajar Pribadi';
+}
 
 interface AuthState {
   hasCompletedOnboarding: boolean;
-  isCloudAuthenticated: boolean;
   isLocalMode: boolean;
   isAuthLoading: boolean;
-  user: User | null;
-  loginWithGoogle: () => Promise<void>;
+  workspaceName: string;
+  enterWorkspace: (workspaceName?: string) => void;
+  setWorkspaceName: (workspaceName: string) => void;
   continueLocally: () => void;
-  logout: () => Promise<void>;
-  setUser: (user: User | null) => void;
+  logout: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  hasCompletedOnboarding: localStorage.getItem("madrasah_auth") !== "false",
-  isCloudAuthenticated: false,
-  isLocalMode: localStorage.getItem("madrasah_auth") !== "false",
-  isAuthLoading: isFirebaseConfigured,
-  user: null,
+  hasCompletedOnboarding: readInitialEntered(),
+  isLocalMode: true,
+  isAuthLoading: false,
+  workspaceName: readInitialWorkspaceName(),
 
-  loginWithGoogle: async () => {
-    if (!isFirebaseConfigured || !auth || !googleProvider) {
-      throw new Error("Layanan Firebase Cloud Auth belum dikonfigurasi.");
+  enterWorkspace: (name) => {
+    const cleanName = name?.trim() || readInitialWorkspaceName();
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(AUTH_STORAGE_KEY, 'true');
+      window.localStorage.setItem(WORKSPACE_NAME_KEY, cleanName);
     }
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      localStorage.setItem("madrasah_auth", "true");
-      set({ hasCompletedOnboarding: true, isCloudAuthenticated: true, isLocalMode: false, user: result.user, isAuthLoading: false });
-    } catch (error) {
-      console.error("Google sign-in error:", error);
-      throw error;
+    set({
+      hasCompletedOnboarding: true,
+      isLocalMode: true,
+      isAuthLoading: false,
+      workspaceName: cleanName,
+    });
+  },
+
+  setWorkspaceName: (name) => {
+    const cleanName = name.trim() || 'Ruang Belajar Pribadi';
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(WORKSPACE_NAME_KEY, cleanName);
     }
+    set({ workspaceName: cleanName });
   },
 
   continueLocally: () => {
-    localStorage.setItem("madrasah_auth", "true");
-    set({ hasCompletedOnboarding: true, isLocalMode: true, isCloudAuthenticated: false, isAuthLoading: false });
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(AUTH_STORAGE_KEY, 'true');
+    }
+    set({
+      hasCompletedOnboarding: true,
+      isLocalMode: true,
+      isAuthLoading: false,
+    });
   },
 
-  logout: async () => {
-    if (isFirebaseConfigured && auth) {
-      try {
-        await signOut(auth);
-      } catch (e) {
-        console.error("Sign out error", e);
-      }
+  logout: () => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(AUTH_STORAGE_KEY, 'false');
     }
-    localStorage.setItem("madrasah_auth", "false");
-    set({ hasCompletedOnboarding: false, isCloudAuthenticated: false, isLocalMode: false, user: null, isAuthLoading: false });
+    set({
+      hasCompletedOnboarding: false,
+      isLocalMode: true,
+      isAuthLoading: false,
+    });
   },
-
-  setUser: (user) => {
-    if (user) {
-      set({
-        user,
-        hasCompletedOnboarding: true,
-        isCloudAuthenticated: true,
-        isLocalMode: false,
-        isAuthLoading: false
-      });
-    } else {
-      set({
-        user: null,
-        isCloudAuthenticated: false,
-        isAuthLoading: false
-      });
-    }
-  }
 }));
-
-// Synchronize Firebase auth listener only if Firebase is configured
-if (isFirebaseConfigured && auth) {
-  try {
-    onAuthStateChanged(
-      auth,
-      (firebaseUser) => {
-        if (firebaseUser) {
-          localStorage.setItem("madrasah_auth", "true");
-          useAuthStore.getState().setUser(firebaseUser);
-        } else {
-          useAuthStore.getState().setUser(null);
-        }
-      },
-      (error) => {
-        console.warn("Firebase onAuthStateChanged error:", error);
-        useAuthStore.setState({ isAuthLoading: false });
-      }
-    );
-  } catch (err) {
-    console.warn("Gagal memasang listener auth Firebase:", err);
-    useAuthStore.setState({ isAuthLoading: false });
-  }
-} else {
-  // Langsung tandai auth loading selesai jika tanpa cloud config
-  useAuthStore.setState({ isAuthLoading: false });
-}
-

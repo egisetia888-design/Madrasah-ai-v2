@@ -1,9 +1,13 @@
 import { useState, useMemo } from "react";
-import { fetchWithAuth } from "../../lib/api";
+import { fetchWithAuth, prepareContentExcerpt } from "../../lib/api";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
 import { ArrowLeft, BookOpen, Clock, PenTool, Brain, Trash2, Edit2, Save, Image as ImageIcon, Book, CheckCircle2, Bookmark, Flame, Plus, X, Sparkles, Loader2, Network, ArrowUpRight, FileText } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { MetadataRow } from "../../components/ui/MetadataRow";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { BookMetadataFields } from "../../components/library/BookMetadataFields";
 import { useLibraryStore } from "../../store/libraryStore";
 import { useNotesStore } from "../../store/notesStore";
 import { useReviewStore } from "../../store/reviewStore";
@@ -11,7 +15,7 @@ import { useKnowledgeStore } from "../../store/knowledgeStore";
 import { BookStatus } from "../../types";
 import { cn } from "../../utils/cn";
 import { useToastStore } from "../../store/toastStore";
-import { scanTextForEntities, autoLinkSingleEntity, createExplicitRelation } from "../../utils/autoLinker";
+import { autoLinkSingleEntity, createExplicitRelation } from "../../utils/autoLinker";
 
 export function BookDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -44,12 +48,15 @@ export function BookDetailPage() {
   }, [readingLogs, id]);
   
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [logToDeleteId, setLogToDeleteId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   
   const [editTitle, setEditTitle] = useState("");
   const [editAuthorName, setEditAuthorName] = useState("");
+  const [editIsbn, setEditIsbn] = useState("");
   const [editCoverUrl, setEditCoverUrl] = useState("");
   const [editTotalPages, setEditTotalPages] = useState("");
+  const [editIsEstimatedPages, setEditIsEstimatedPages] = useState(false);
   
   const [isProgressOpen, setIsProgressOpen] = useState(false);
   const [updateProgress, setUpdateProgress] = useState("");
@@ -72,9 +79,9 @@ export function BookDetailPage() {
 
   if (!book) {
     return (
-      <div className="flex flex-col items-center justify-center h-full space-y-4 py-24">
+      <div className="flex flex-col items-center justify-center h-full space-y-4 py-24 text-center">
         <Book className="w-12 h-12 text-gray-300" />
-        <h2 className="text-xl font-medium text-gray-900">Buku tidak ditemukan</h2>
+        <h2 className="text-xl font-semibold text-gray-900 font-display">Buku tidak ditemukan</h2>
         <Button variant="outline" onClick={() => navigate("/library")}>
           <ArrowLeft className="w-4 h-4 mr-2" /> Kembali ke Pustaka
         </Button>
@@ -157,7 +164,8 @@ export function BookDetailPage() {
     }
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (book && editTitle.trim()) {
       let authorId = book.authorId;
       if (editAuthorName.trim()) {
@@ -171,11 +179,15 @@ export function BookDetailPage() {
         authorId = null;
       }
 
+      const parsedPages = editTotalPages ? parseInt(editTotalPages, 10) : NaN;
+
       updateBook(book.id, { 
         title: editTitle.trim(),
         authorId,
+        isbn: editIsbn.trim() || undefined,
         coverImage: editCoverUrl.trim() || undefined,
-        totalPages: editTotalPages ? parseInt(editTotalPages) : undefined
+        totalPages: !isNaN(parsedPages) && parsedPages > 0 ? parsedPages : undefined,
+        isEstimatedPages: !isNaN(parsedPages) && parsedPages > 0 && editIsEstimatedPages ? true : undefined,
       });
       setIsEditing(false);
     }
@@ -185,8 +197,10 @@ export function BookDetailPage() {
     if (book) {
       setEditTitle(book.title);
       setEditAuthorName(author ? author.name : "");
+      setEditIsbn(book.isbn || "");
       setEditCoverUrl(book.coverImage || "");
       setEditTotalPages(book.totalPages ? book.totalPages.toString() : "");
+      setEditIsEstimatedPages(Boolean(book.isEstimatedPages));
       setIsEditing(true);
     }
   };
@@ -237,12 +251,12 @@ export function BookDetailPage() {
     switch (status) {
       case 'reading': return 'Sedang Dibaca';
       case 'finished': return 'Selesai';
-      case 'wishlist': return 'Wishlist';
+      case 'wishlist': return 'Daftar Ingin';
       case 'summarized': return 'Dirangkum';
       case 'connected': return 'Terhubung';
       case 'applied': return 'Diterapkan';
       case 'published': return 'Dipublikasikan';
-      default: return 'Milik Saya';
+      default: return 'Dimiliki';
     }
   }
 
@@ -261,7 +275,7 @@ export function BookDetailPage() {
       const res = await fetchWithAuth("/api/ai/summarize-literature", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: textToSummarize })
+        body: JSON.stringify({ content: prepareContentExcerpt(textToSummarize, 4800) })
       });
       const data = await res.json();
       if (res.ok && data) {
@@ -308,90 +322,87 @@ export function BookDetailPage() {
     <div className="space-y-8 animate-in fade-in duration-500 max-w-6xl mx-auto pb-20">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6 pb-2">
          <div className="flex-1 flex gap-6">
-            <div className="w-32 h-48 shrink-0 bg-gray-100 rounded-xl border border-gray-200 overflow-hidden shadow-sm hidden sm:block relative">
+            <div className="w-32 h-48 shrink-0 bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden shadow-sm hidden sm:block relative">
               {book.coverImage && (
                 <img 
                   src={book.coverImage} 
                   alt={book.title} 
+                  referrerPolicy="no-referrer"
                   className="absolute inset-0 w-full h-full object-cover z-10" 
                   onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
               )}
               <div className="absolute inset-0 flex flex-col items-center justify-center h-full text-gray-400 bg-gray-100 z-0">
                 <ImageIcon className="w-8 h-8 mb-2 opacity-50" />
-                <span className="text-[10px] font-medium uppercase tracking-wider">Sampul</span>
+                <span className="text-[10px] font-medium uppercase tracking-wider font-mono">Sampul</span>
               </div>
               <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent z-20 pointer-events-none"></div>
             </div>
             
-            <div className="flex-1 flex flex-col justify-center">
+            <div className="flex-1 flex flex-col justify-center min-w-0">
               <Button variant="ghost" className="gap-2 -ml-3 text-gray-500 hover:text-gray-900 self-start mb-2" onClick={() => navigate("/library")}>
-                 <ArrowLeft className="w-4 h-4" /> <span className="hidden sm:inline">Kembali</span>
+                 <ArrowLeft className="w-4 h-4" /> <span>Kembali</span>
               </Button>
                
-               <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900 leading-tight mb-2">{book.title}</h1>
-               <p className="text-lg text-gray-600 font-medium mb-4">{author ? author.name : "Penulis Tidak Diketahui"}</p>
+               <h1 className="text-2xl sm:text-4xl font-bold tracking-tight text-gray-900 font-display leading-tight mb-1.5">{book.title}</h1>
+               <p className="text-base sm:text-lg text-gray-600 font-medium mb-4">{author ? author.name : "Penulis Tidak Diketahui"}</p>
                
                <div className="flex flex-wrap items-center gap-3">
-                 <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white shadow-sm p-1">
+                 <div className="inline-flex flex-wrap items-center rounded-xl border border-gray-200 bg-white shadow-sm p-1 gap-1">
                    {(['wishlist', 'owned', 'reading', 'finished', 'summarized'] as BookStatus[]).map(s => (
                      <button
                        key={s}
                        onClick={() => handleUpdateStatus(s)}
+                       title={getStatusLabel(s)}
                        className={cn(
-                         "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                         "flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-medium transition-all min-h-[40px] sm:min-h-0",
                          book.status === s 
                            ? "bg-gray-900 text-white shadow-sm" 
                            : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
                        )}
                      >
                        {getStatusIcon(s)}
-                       <span className="hidden md:inline">{getStatusLabel(s)}</span>
+                       <span className={cn(book.status === s ? "inline" : "hidden md:inline")}>{getStatusLabel(s)}</span>
                      </button>
                    ))}
                  </div>
                  
                  <Button variant="outline" size="sm" className="gap-2" onClick={startEditing}>
                    <Edit2 className="w-4 h-4" />
-                   <span className="hidden sm:inline">Edit Detail</span>
+                   <span>Edit Detail</span>
                  </Button>
                </div>
             </div>
          </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
         
         {/* Left Column: Core Book Info & Reading */}
         <div className="lg:col-span-1 space-y-6">
           <div className="p-6 border border-gray-200 rounded-2xl bg-white space-y-5 shadow-sm relative overflow-hidden">
-             <div className="absolute top-0 left-0 w-1 bg-gray-500 h-full"></div>
-             
              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-900 uppercase tracking-wider flex items-center gap-2">
+                <span className="text-xs font-semibold text-gray-700 font-mono uppercase tracking-wider flex items-center gap-2">
                   <BookOpen className="w-4 h-4 text-gray-400" />
                   Progres Membaca
                 </span>
-                <span className="font-bold text-xl text-gray-900">{progressPct}%</span>
+                <span className="font-bold text-xl text-gray-900 font-mono tabular-nums">{progressPct}%</span>
              </div>
              
              <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
                 <div className="h-full bg-gray-900 rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }}></div>
              </div>
              
-             <div className="flex justify-between text-sm text-gray-500 font-medium">
-                <span><strong className="text-gray-900">{book.progress}</strong> hal dibaca</span>
-                <span className="flex items-center gap-1.5">
-                  <strong className="text-gray-900">{book.totalPages || '?'}</strong> total hal
-                  {book.isEstimatedPages && (
-                    <span className="text-[10px] font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">
-                      perkiraan
-                    </span>
-                  )}
-                </span>
-             </div>
+             <MetadataRow
+               items={[
+                 `${book.progress} hal dibaca`,
+                 `${book.totalPages || '?'} total hal`,
+                 book.isbn ? `ISBN ${book.isbn}` : false,
+                 book.isEstimatedPages ? 'perkiraan' : false,
+               ]}
+             />
              
-             <div className="flex gap-2 pt-2">
+             <div className="flex gap-2 pt-1">
                <Button className="w-full gap-2" onClick={() => {
                  setUpdateProgress(book.progress.toString());
                  setIsProgressOpen(true);
@@ -403,25 +414,23 @@ export function BookDetailPage() {
 
           <div className="p-6 border border-gray-200 rounded-2xl bg-white space-y-4 shadow-sm">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider flex items-center gap-2">
-                <Clock className="w-4 h-4 text-gray-700"/> Riwayat Sesi Baca ({bookReadingLogs.length})
+              <h3 className="text-xs font-semibold text-gray-700 font-mono uppercase tracking-wider flex items-center gap-2">
+                <Clock className="w-4 h-4 text-gray-500"/> Riwayat Sesi Baca ({bookReadingLogs.length})
               </h3>
             </div>
 
             {bookReadingLogs.length > 0 ? (
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                 {bookReadingLogs.slice(0, 8).map((log) => (
-                  <div key={log.id} className="p-2.5 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-between text-xs">
-                    <div className="min-w-0 pr-2">
-                      <div className="flex items-center gap-1.5 font-medium text-gray-900">
-                        <span className="font-mono bg-gray-900 text-white px-1.5 py-0.5 rounded text-[11px]">
-                          +{log.pagesRead} hal
-                        </span>
-                        <span className="text-gray-500 font-mono text-[11px]">
-                          (hal. {log.startPage} → {log.endPage})
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-gray-400 mt-1">
+                  <div key={log.id} className="p-3 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-between gap-2 text-xs">
+                    <div className="min-w-0">
+                      <MetadataRow
+                        items={[
+                          <span className="font-semibold text-gray-900">+{log.pagesRead} hal</span>,
+                          `hal. ${log.startPage} → ${log.endPage}`,
+                        ]}
+                      />
+                      <p className="text-[11px] text-gray-400 font-mono tabular-nums mt-1">
                         {new Date(log.date).toLocaleDateString('id-ID', {
                           day: 'numeric',
                           month: 'short',
@@ -433,17 +442,17 @@ export function BookDetailPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => deleteReadingLog(log.id)}
+                      onClick={() => setLogToDeleteId(log.id)}
                       title="Hapus catatan sesi ini"
-                      className="text-gray-300 hover:text-gray-600 p-1 rounded transition-colors shrink-0"
+                      className="text-gray-400 hover:text-gray-900 min-h-[44px] min-w-[44px] sm:min-h-[32px] sm:min-w-[32px] flex items-center justify-center rounded-lg hover:bg-gray-200/50 transition-colors shrink-0"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 ))}
                 {bookReadingLogs.length > 8 && (
-                  <p className="text-[11px] text-gray-400 text-center pt-1">
-                    Menampilkan 8 sesi terbaru dari total {bookReadingLogs.length} sesi
+                  <p className="text-[11px] text-gray-400 text-center pt-1 font-mono">
+                    Menampilkan 8 sesi terbaru dari {bookReadingLogs.length} sesi
                   </p>
                 )}
               </div>
@@ -456,14 +465,14 @@ export function BookDetailPage() {
           
           <div className="p-6 border border-gray-200 rounded-2xl bg-white space-y-4 shadow-sm">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider flex items-center gap-2">
-                <Network className="w-4 h-4 text-gray-700"/> Relasi Pengetahuan ({bookRelations.length})
+              <h3 className="text-xs font-semibold text-gray-700 font-mono uppercase tracking-wider flex items-center gap-2">
+                <Network className="w-4 h-4 text-gray-500"/> Relasi Pengetahuan ({bookRelations.length})
               </h3>
               <button 
-                onClick={() => navigate('/knowledge')}
-                className="text-xs text-gray-500 hover:text-gray-900 font-medium flex items-center gap-0.5"
+                onClick={() => navigate('/graph')}
+                className="text-xs text-gray-500 hover:text-gray-900 font-medium flex items-center gap-0.5 py-1 px-2 -mr-2 rounded-lg"
               >
-                Graf <ArrowUpRight className="w-3 h-3" />
+                Graf <ArrowUpRight className="w-3.5 h-3.5" />
               </button>
             </div>
             
@@ -482,17 +491,17 @@ export function BookDetailPage() {
                       key={rel.id}
                       onClick={() => {
                         if (note) navigate(`/notes/${note.id}`);
-                        else navigate('/knowledge');
+                        else navigate('/graph');
                       }}
-                      className="p-2.5 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-300 transition-all cursor-pointer flex items-center justify-between text-xs"
+                      className="p-3 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-300 transition-all cursor-pointer flex items-center justify-between gap-2 text-xs"
                     >
-                      <div className="flex items-center gap-2 min-w-0 pr-2">
+                      <div className="flex items-center gap-2 min-w-0">
                         {type === 'concept' ? <Brain className="w-3.5 h-3.5 text-gray-600 shrink-0" /> :
                          <FileText className="w-3.5 h-3.5 text-gray-600 shrink-0" />}
                         <span className="font-medium text-gray-900 truncate">{label}</span>
                       </div>
-                      <span className="text-[10px] font-mono uppercase text-gray-400 shrink-0 bg-white px-1.5 py-0.5 rounded border border-gray-200">
-                        {rel.relationType}
+                      <span className="text-[11px] font-mono text-gray-500 shrink-0">
+                        · {rel.relationType}
                       </span>
                     </div>
                   );
@@ -504,22 +513,22 @@ export function BookDetailPage() {
           </div>
 
           <div className="p-6 border border-gray-200 rounded-2xl bg-white space-y-4 shadow-sm">
-            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-2 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-gray-400"/> Riwayat & Waktu
+            <h3 className="text-xs font-semibold text-gray-700 font-mono uppercase tracking-wider mb-2 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-gray-400"/> Riwayat &amp; Waktu
             </h3>
             <div className="space-y-3">
               <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
                 <span className="text-gray-500">Ditambahkan</span>
-                <span className="font-medium text-gray-900">{new Date(book.createdAt).toLocaleDateString()}</span>
+                <span className="font-medium text-gray-900 font-mono tabular-nums">{new Date(book.createdAt).toLocaleDateString('id-ID')}</span>
               </div>
               <div className="flex justify-between items-center text-sm">
                 <span className="text-gray-500">Terakhir Diperbarui</span>
-                <span className="font-medium text-gray-900">{new Date(book.updatedAt).toLocaleDateString()}</span>
+                <span className="font-medium text-gray-900 font-mono tabular-nums">{new Date(book.updatedAt).toLocaleDateString('id-ID')}</span>
               </div>
             </div>
             
             <div className="pt-4 mt-4 border-t border-gray-100">
-               <Button variant="ghost" className="w-full text-gray-900 hover:text-gray-800 hover:bg-gray-50 gap-2" onClick={() => setIsDeleteDialogOpen(true)}>
+               <Button variant="ghost" className="w-full text-gray-700 hover:text-gray-900 hover:bg-gray-100 gap-2" onClick={() => setIsDeleteDialogOpen(true)}>
                  <Trash2 className="w-4 h-4" /> Hapus Materi
                </Button>
             </div>
@@ -529,52 +538,52 @@ export function BookDetailPage() {
         {/* Right Column: Knowledge Hub */}
         <div className="lg:col-span-2 space-y-6">
           <div className="grid grid-cols-2 gap-4">
-            <div className="p-6 border border-gray-200 rounded-2xl bg-white shadow-sm flex flex-col items-center justify-center text-center gap-2">
-              <span className="text-4xl font-bold text-gray-900">{bookNotes.length}</span>
-              <span className="text-sm font-medium text-gray-500 uppercase tracking-wider flex items-center gap-1.5"><PenTool className="w-4 h-4 text-gray-500"/> Catatan Literatur</span>
+            <div className="p-5 sm:p-6 border border-gray-200 rounded-2xl bg-white shadow-sm flex flex-col items-center justify-center text-center gap-1.5">
+              <span className="text-3xl sm:text-4xl font-bold text-gray-900 font-display tabular-nums">{bookNotes.length}</span>
+              <span className="text-xs font-medium text-gray-500 font-mono flex items-center gap-1.5"><PenTool className="w-3.5 h-3.5 text-gray-500"/> Catatan Literatur</span>
             </div>
-            <div className="p-6 border border-gray-200 rounded-2xl bg-white shadow-sm flex flex-col items-center justify-center text-center gap-2">
-              <span className="text-4xl font-bold text-gray-900">{bookFlashcards.length}</span>
-              <span className="text-sm font-medium text-gray-500 uppercase tracking-wider flex items-center gap-1.5"><Brain className="w-4 h-4 text-gray-500"/> Kartu Ulasan</span>
+            <div className="p-5 sm:p-6 border border-gray-200 rounded-2xl bg-white shadow-sm flex flex-col items-center justify-center text-center gap-1.5">
+              <span className="text-3xl sm:text-4xl font-bold text-gray-900 font-display tabular-nums">{bookFlashcards.length}</span>
+              <span className="text-xs font-medium text-gray-500 font-mono flex items-center gap-1.5"><Brain className="w-3.5 h-3.5 text-gray-500"/> Kartu Ulasan</span>
             </div>
           </div>
           
-          <div className="p-6 border border-gray-200 rounded-2xl bg-white shadow-sm space-y-6">
-             <div className="flex items-center justify-between pb-4 border-b border-gray-100">
-               <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+          <div className="p-5 sm:p-6 border border-gray-200 rounded-2xl bg-white shadow-sm space-y-6">
+             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-gray-100">
+               <h3 className="text-lg font-bold text-gray-900 font-display">
                  Catatan Literatur Tertaut
                </h3>
-               <div className="flex items-center gap-2">
-                 <Button variant="outline" size="sm" onClick={() => setIsSummarizeOpen(true)} className="text-xs h-8 gap-1.5 text-gray-800 bg-gray-50 hover:bg-gray-100 border-gray-200">
+               <div className="flex flex-wrap items-center gap-2">
+                 <Button variant="outline" size="sm" onClick={() => setIsSummarizeOpen(true)} className="gap-1.5 text-gray-800 bg-gray-50 hover:bg-gray-100 border-gray-200">
                    <Sparkles className="w-3.5 h-3.5 text-gray-900" /> Ringkas AI
                  </Button>
-                 <Button variant="outline" size="sm" onClick={() => setIsQuickAdding(!isQuickAdding)} className={cn("text-xs h-8 gap-2", isQuickAdding && "bg-gray-100")}>
+                 <Button variant="outline" size="sm" onClick={() => setIsQuickAdding(!isQuickAdding)} className={cn("gap-1.5", isQuickAdding && "bg-gray-100")}>
                    {isQuickAdding ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />} {isQuickAdding ? "Batal" : "Tambah Cepat"}
                  </Button>
-                 <Button variant="outline" size="sm" onClick={handleCreateNote} className="text-xs h-8 gap-2">
+                 <Button variant="outline" size="sm" onClick={handleCreateNote} className="gap-1.5">
                    <Plus className="w-3.5 h-3.5" /> Catatan Penuh
                  </Button>
                </div>
              </div>
              
              {isQuickAdding && (
-               <div className="p-4 border border-gray-200 bg-gray-50/50 rounded-xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+               <div className="p-4 border border-gray-200 bg-gray-50/50 rounded-2xl space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
                  <input 
                    type="text" 
                    value={quickNoteTitle}
                    onChange={(e) => setQuickNoteTitle(e.target.value)}
                    placeholder="Judul Ide / Catatan Cepat..."
-                   className="w-full bg-white border border-gray-100 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-gray-500"
+                   className="w-full h-11 md:h-9 bg-white border border-gray-200 rounded-xl px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900"
                    autoFocus
                  />
                  <textarea 
                    value={quickNoteContent}
                    onChange={(e) => setQuickNoteContent(e.target.value)}
                    placeholder="Isi catatan (opsional)..."
-                   className="w-full bg-white border border-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none min-h-[80px]"
+                   className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-900 resize-none min-h-[80px]"
                  />
                  <div className="flex justify-end">
-                   <Button size="sm" onClick={handleSaveQuickNote} disabled={!quickNoteTitle.trim()} className="bg-gray-900 hover:bg-gray-800 text-white text-xs h-8">
+                   <Button size="sm" onClick={handleSaveQuickNote} disabled={!quickNoteTitle.trim()} className="bg-gray-900 hover:bg-gray-800 text-white">
                      Simpan Catatan
                    </Button>
                  </div>
@@ -584,84 +593,68 @@ export function BookDetailPage() {
              {bookNotes.length > 0 ? (
                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                  {bookNotes.map(note => (
-                   <div key={note.id} onClick={() => navigate(`/notes/${note.id}`)} className="p-5 border border-gray-200 rounded-xl bg-gray-50/50 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all cursor-pointer group">
-                     <h4 className="font-semibold text-sm text-gray-900 mb-2 group-hover:text-gray-900 transition-colors line-clamp-2">{note.title}</h4>
-                     <p className="text-xs text-gray-600 line-clamp-3 leading-relaxed">{note.content}</p>
-                     <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-[10px] text-gray-400 font-medium uppercase tracking-wider">
-                       <span>{new Date(note.createdAt).toLocaleDateString()}</span>
-                       <span className={cn("px-2 py-0.5 rounded", note.status === 'processed' ? 'bg-gray-100 text-gray-800' : 'bg-gray-200 text-gray-600')}>{note.status === 'processed' ? 'Diproses' : 'Mentah'}</span>
-                     </div>
+                   <div key={note.id} onClick={() => navigate(`/notes/${note.id}`)} className="p-5 border border-gray-200 rounded-2xl bg-gray-50/50 hover:bg-white hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer group flex flex-col">
+                     <h4 className="font-semibold text-sm text-gray-900 font-display mb-2 line-clamp-2">{note.title}</h4>
+                     <p className="text-xs text-gray-600 line-clamp-3 leading-relaxed flex-1">{note.content}</p>
+                     <MetadataRow
+                       className="mt-4 pt-3 border-t border-gray-100"
+                       items={[
+                         new Date(note.createdAt).toLocaleDateString('id-ID'),
+                         note.status === 'processed' ? 'Terproses' : 'Mentah',
+                       ]}
+                     />
                    </div>
                  ))}
                </div>
              ) : (
-               <div className="p-8 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center text-center">
-                 <div className="w-12 h-12 bg-white rounded-xl shadow-sm border border-gray-100 flex items-center justify-center mb-4">
-                   <PenTool className="w-6 h-6 text-gray-400" />
-                 </div>
-                 <h4 className="text-sm font-semibold text-gray-900 mb-1">Belum ada catatan literatur</h4>
-                 <p className="text-sm text-gray-500 max-w-sm mb-4">Ubah materi yang Anda baca menjadi pengetahuan yang bisa digunakan dengan menulis catatan literatur.</p>
-                 <Button variant="outline" size="sm" onClick={() => setIsQuickAdding(true)} className="gap-2 bg-white">
-                   <Plus className="w-3.5 h-3.5" /> Mulai Menulis Cepat
-                 </Button>
-               </div>
+               <EmptyState
+                 compact
+                 icon={PenTool}
+                 title="Belum ada catatan literatur"
+                 description="Ubah materi yang Anda baca menjadi pengetahuan yang bisa digunakan dengan menulis catatan literatur."
+                 action={
+                   <Button variant="outline" size="sm" onClick={() => setIsQuickAdding(true)} className="gap-2 bg-white">
+                     <Plus className="w-3.5 h-3.5" /> Mulai Menulis Cepat
+                   </Button>
+                 }
+               />
              )}
           </div>
           
         </div>
       </div>
 
-      <Dialog open={isEditing} onOpenChange={setIsEditing}>
+      <Dialog open={isEditing} onOpenChange={setIsEditing} maxWidthClass="max-w-xl">
         <DialogHeader>
           <DialogTitle>Edit Detail Buku</DialogTitle>
         </DialogHeader>
-        <DialogContent className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Judul <span className="text-gray-500">*</span></label>
-            <input 
-              type="text" 
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent" 
-              required
+        <form className="flex flex-col flex-1 min-h-0 overflow-hidden" onSubmit={handleSaveEdit}>
+          <DialogContent className="space-y-4">
+            <BookMetadataFields
+              title={editTitle}
+              onTitleChange={setEditTitle}
+              authorName={editAuthorName}
+              onAuthorNameChange={setEditAuthorName}
+              isbn={editIsbn}
+              onIsbnChange={setEditIsbn}
+              totalPages={editTotalPages}
+              onTotalPagesChange={setEditTotalPages}
+              coverUrl={editCoverUrl}
+              onCoverUrlChange={setEditCoverUrl}
+              isEstimatedPages={editIsEstimatedPages}
+              onIsEstimatedPagesChange={setEditIsEstimatedPages}
+              resetTrigger={isEditing ? book.id : "closed"}
             />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Penulis</label>
-              <input 
-                type="text" 
-                value={editAuthorName}
-                onChange={(e) => setEditAuthorName(e.target.value)}
-                className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent" 
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Total Halaman</label>
-              <input 
-                type="number"
-                min="1"
-                value={editTotalPages}
-                onChange={(e) => setEditTotalPages(e.target.value)}
-                className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent" 
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">URL Sampul (Opsional)</label>
-            <input 
-              type="url" 
-              value={editCoverUrl}
-              onChange={(e) => setEditCoverUrl(e.target.value)}
-              className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent" 
-              placeholder="https://..."
-            />
-          </div>
-        </DialogContent>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setIsEditing(false)}>Batal</Button>
-          <Button onClick={handleSaveEdit} disabled={!editTitle.trim()}>Simpan Perubahan</Button>
-        </DialogFooter>
+          </DialogContent>
+          <DialogFooter className="pt-4 border-t border-gray-100">
+            <Button type="button" variant="ghost" onClick={() => setIsEditing(false)} className="w-full sm:w-auto mb-2 sm:mb-0">
+              Batal
+            </Button>
+            <Button type="submit" className="w-full sm:w-auto" disabled={!editTitle.trim()}>
+              Simpan Perubahan
+            </Button>
+          </DialogFooter>
+        </form>
       </Dialog>
       
       <Dialog open={isProgressOpen} onOpenChange={setIsProgressOpen}>
@@ -678,11 +671,11 @@ export function BookDetailPage() {
                 max={book.totalPages || undefined}
                 value={updateProgress}
                 onChange={(e) => setUpdateProgress(e.target.value)}
-                className="flex h-11 w-full rounded-md border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent" 
+                className="flex h-11 md:h-9 w-full rounded-xl border border-gray-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/10 focus-visible:border-gray-900" 
                 required
               />
               {book.totalPages && (
-                <p className="text-xs text-gray-500">Dari total {book.totalPages} halaman.</p>
+                <p className="text-xs text-gray-500 font-mono">Dari total {book.totalPages} halaman.</p>
               )}
               {updateProgress !== "" && !isNaN(parseInt(updateProgress)) && (
                 <div className="p-2.5 rounded-xl bg-gray-50 border border-gray-100 text-xs">
@@ -708,18 +701,30 @@ export function BookDetailPage() {
         </form>
       </Dialog>
 
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogHeader>
-          <DialogTitle>Hapus Materi</DialogTitle>
-        </DialogHeader>
-        <DialogContent>
-          <p className="text-gray-600">Apakah Anda yakin ingin menghapus materi "{book.title}"? Catatan yang berhubungan dengan buku ini tidak akan terhapus namun status keterkaitannya mungkin hilang. Tindakan ini tidak dapat dibatalkan.</p>
-        </DialogContent>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setIsDeleteDialogOpen(false)}>Batal</Button>
-          <Button variant="destructive" onClick={handleDelete} className="bg-gray-900 hover:bg-gray-800 text-white">Hapus Materi</Button>
-        </DialogFooter>
-      </Dialog>
+      <ConfirmDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        title="Hapus Materi"
+        description={`Apakah Anda yakin ingin menghapus materi "${book.title}"? Catatan yang terhubung tetap tersimpan tanpa tautan buku ini.`}
+        confirmLabel="Hapus Materi"
+        onConfirm={handleDelete}
+      />
+
+      <ConfirmDialog
+        open={Boolean(logToDeleteId)}
+        onOpenChange={(open) => {
+          if (!open) setLogToDeleteId(null);
+        }}
+        title="Hapus Catatan Sesi Baca"
+        description="Apakah Anda yakin ingin menghapus catatan sesi membaca ini dari riwayat?"
+        confirmLabel="Hapus Sesi"
+        onConfirm={() => {
+          if (logToDeleteId) {
+            deleteReadingLog(logToDeleteId);
+            setLogToDeleteId(null);
+          }
+        }}
+      />
 
       <Dialog open={isSummarizeOpen} onOpenChange={setIsSummarizeOpen}>
         <DialogHeader>

@@ -1,98 +1,148 @@
-import { useState } from "react"
-import { useNavigate } from "react-router-dom"
-import { HardDrive } from "lucide-react"
-import { Button } from "../../components/ui/Button"
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card"
-import { useAuthStore } from "../../store/authStore"
-import { isFirebaseConfigured } from "../../lib/firebase"
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ArrowRight, HardDrive, Upload, CheckCircle2, AlertCircle } from "lucide-react";
+import { Button } from "../../components/ui/Button";
+import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
+import { useAuthStore } from "../../store/authStore";
+import { importUnifiedBackup } from "../../store/indexedDbStorage";
 
 export function LoginPage() {
-  const navigate = useNavigate()
-  const loginWithGoogle = useAuthStore(state => state.loginWithGoogle)
-  const continueLocally = useAuthStore(state => state.continueLocally)
-  
-  const [error, setError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const navigate = useNavigate();
+  const storedWorkspaceName = useAuthStore((state) => state.workspaceName);
+  const enterWorkspace = useAuthStore((state) => state.enterWorkspace);
 
-  const handleGoogleLogin = async () => {
-    if (!isFirebaseConfigured) {
-      setError("Firebase Cloud belum dikonfigurasi pada server ini. Silakan gunakan Mode Lokal.")
-      return
-    }
-    setError(null)
-    setIsLoading(true)
-    try {
-      await loginWithGoogle()
-      navigate("/")
-    } catch (err: any) {
-      console.error("Auth error", err)
-      setError("Gagal masuk dengan Google. Silakan coba lagi atau gunakan Mode Lokal.")
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  const [workspaceInput, setWorkspaceInput] = useState(storedWorkspaceName);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
 
-  const handleContinueLocally = () => {
-    continueLocally()
-    navigate("/")
-  }
+  const handleEnterWorkspace = (e: React.FormEvent) => {
+    e.preventDefault();
+    enterWorkspace(workspaceInput);
+    navigate("/");
+  };
+
+  const handleQuickRestore = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setErrorMessage(null);
+    setStatusMessage(null);
+    setIsRestoring(true);
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const rawJson = String(event.target?.result || "");
+        const summary = await importUnifiedBackup(rawJson);
+        setStatusMessage(
+          `Berhasil memulihkan ${summary.totalEntities} entitas dari ${summary.storeCount} penyimpanan.`
+        );
+        enterWorkspace(workspaceInput);
+        setTimeout(() => {
+          window.location.href = "/";
+        }, 700);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Format berkas cadangan JSON tidak valid.";
+        setErrorMessage(msg);
+      } finally {
+        setIsRestoring(false);
+      }
+    };
+    reader.readAsText(file);
+  };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50/50 px-4 font-sans">
-      <Card className="w-full max-w-sm border-gray-200 shadow-sm rounded-2xl">
-        <CardHeader className="text-center pb-4 pt-8">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50/50 px-4 py-8 font-sans">
+      <Card className="w-full max-w-md border-gray-200 shadow-sm rounded-2xl bg-white">
+        <CardHeader className="text-center pb-4 pt-8 px-6">
           <div className="w-12 h-12 bg-gray-900 rounded-xl mx-auto mb-4 flex items-center justify-center shadow-sm">
             <span className="text-white font-bold font-display text-xl">M</span>
           </div>
-          <CardTitle className="text-xl font-display text-gray-900">
-            Masuk ke Madrasah
+          <CardTitle className="text-xl font-display text-gray-900 tracking-tight">
+            Selamat Datang di Madrasah
           </CardTitle>
-          <p className="text-sm text-gray-500 mt-2">
-            Sistem Operasi Pengetahuan Pribadi
+          <p className="text-sm text-gray-500 mt-1.5 leading-relaxed">
+            Sistem Operasi Pengetahuan Pribadi yang langsung siap digunakan secara luring di perangkat Anda.
           </p>
         </CardHeader>
-        <CardContent className="pb-8 space-y-4">
-          
-          {error && (
-            <p className="text-sm text-red-600 font-medium bg-red-50 p-2.5 rounded-lg border border-red-100 text-center">
-              {error}
-            </p>
+
+        <CardContent className="pb-8 px-6 space-y-5">
+          {errorMessage && (
+            <div className="flex items-start gap-2 text-xs text-gray-900 bg-gray-100 p-3 rounded-xl border border-gray-200">
+              <AlertCircle className="w-4 h-4 text-gray-700 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
           )}
 
-          <Button 
-            type="button" 
-            variant="outline" 
-            className="w-full flex items-center justify-center gap-2 h-11 border-gray-200 rounded-xl shadow-sm text-gray-700 hover:bg-gray-50"
-            onClick={handleGoogleLogin}
-            disabled={isLoading}
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-            </svg>
-            {isLoading ? "Memproses..." : "Masuk dengan Google (Cloud)"}
-          </Button>
+          {statusMessage && (
+            <div className="flex items-start gap-2 text-xs text-gray-900 bg-gray-50 p-3 rounded-xl border border-gray-200">
+              <CheckCircle2 className="w-4 h-4 text-gray-800 shrink-0 mt-0.5" />
+              <span>{statusMessage}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleEnterWorkspace} className="space-y-4">
+            <div>
+              <label
+                htmlFor="workspace-name"
+                className="block text-xs font-medium text-gray-600 mb-1.5"
+              >
+                Nama Ruang Kerja Lokal
+              </label>
+              <input
+                id="workspace-name"
+                type="text"
+                value={workspaceInput}
+                onChange={(e) => setWorkspaceInput(e.target.value)}
+                placeholder="Ruang Belajar Pribadi"
+                className="w-full h-11 px-3.5 text-sm bg-white border border-gray-200 rounded-xl text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-900"
+              />
+            </div>
+
+            <Button
+              type="submit"
+              className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white rounded-xl flex items-center justify-center gap-2 text-sm font-medium transition-colors"
+            >
+              <span>Masuk ke Ruang Kerja</span>
+              <ArrowRight className="w-4 h-4" />
+            </Button>
+          </form>
 
           <div className="relative flex py-1 items-center">
-            <div className="flex-grow border-t border-gray-200"></div>
+            <div className="flex-grow border-t border-gray-200" />
             <span className="flex-shrink mx-3 text-xs text-gray-400">atau</span>
-            <div className="flex-grow border-t border-gray-200"></div>
+            <div className="flex-grow border-t border-gray-200" />
           </div>
 
-          <Button
-            type="button"
-            variant="ghost"
-            className="w-full flex items-center justify-center gap-2 h-11 border border-dashed border-gray-300 rounded-xl text-gray-700 hover:text-gray-900 hover:bg-gray-50 text-sm font-medium"
-            onClick={handleContinueLocally}
-          >
-            <HardDrive className="w-4 h-4 text-gray-500" />
-            Lanjutkan dalam Mode Lokal (Offline)
-          </Button>
-          
+          <div className="relative">
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={handleQuickRestore}
+              disabled={isRestoring}
+              aria-label="Pulihkan data dari file backup JSON"
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isRestoring}
+              className="w-full h-11 border-gray-200 rounded-xl text-gray-700 hover:text-gray-900 hover:bg-gray-50 flex items-center justify-center gap-2 text-sm font-medium pointer-events-none"
+            >
+              <Upload className="w-4 h-4 text-gray-500" />
+              <span>{isRestoring ? "Memulihkan Cadangan..." : "Pulihkan dari Backup JSON"}</span>
+            </Button>
+          </div>
+
+          <div className="pt-2 flex items-center justify-center gap-2 text-[11px] font-mono text-gray-500">
+            <HardDrive className="w-3.5 h-3.5 text-gray-400" />
+            <span>IndexedDB Lokal</span>
+            <span aria-hidden="true">·</span>
+            <span>Tanpa Konfigurasi Cloud</span>
+          </div>
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

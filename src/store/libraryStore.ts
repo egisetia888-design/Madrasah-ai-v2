@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Book, Author, Category, ReadingLog, SyncMetadata } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
-import { syncSaveBook, syncDeleteBook, syncSaveReadingLog, syncDeleteReadingLog } from '../lib/firestoreSync';
 import { createIndexedDbStorage } from './indexedDbStorage';
 
 interface LibraryState {
@@ -42,22 +41,15 @@ export const useLibraryStore = create<LibraryState>()(
         set((state) => ({
           books: [newBook, ...state.books]
         }));
-        syncSaveBook(newBook);
         return id;
       },
       
       updateBook: (id, bookData) => {
-        set((state) => {
-          const updatedBooks = state.books.map(b => {
-            if (b.id === id) {
-              const updated = { ...b, ...bookData, ...updateSyncMetadata(b) };
-              syncSaveBook(updated);
-              return updated;
-            }
-            return b;
-          });
-          return { books: updatedBooks };
-        });
+        set((state) => ({
+          books: state.books.map(b =>
+            b.id === id ? { ...b, ...bookData, ...updateSyncMetadata(b) } : b
+          )
+        }));
       },
       
       deleteBook: (id) => {
@@ -66,7 +58,6 @@ export const useLibraryStore = create<LibraryState>()(
           // Also clean up reading logs for deleted book
           readingLogs: (state.readingLogs || []).filter(l => l.bookId !== id)
         }));
-        syncDeleteBook(id);
       },
 
       addAuthor: (name) => {
@@ -96,7 +87,6 @@ export const useLibraryStore = create<LibraryState>()(
         set((state) => ({
           readingLogs: [newLog, ...(state.readingLogs || [])]
         }));
-        syncSaveReadingLog(newLog);
         return id;
       },
 
@@ -104,7 +94,6 @@ export const useLibraryStore = create<LibraryState>()(
         set((state) => ({
           readingLogs: (state.readingLogs || []).filter(l => l.id !== id)
         }));
-        syncDeleteReadingLog(id);
       },
     }),
     {

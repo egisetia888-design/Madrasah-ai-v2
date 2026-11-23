@@ -1,14 +1,16 @@
-import { SyncStatusIndicator } from '../../components/ui/SyncStatusIndicator';
 import { useState, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "../../components/ui/Button"
-import { Plus, Search, Briefcase, MoreVertical, LayoutList, Calendar, CheckCircle2, Clock, Inbox, PlayCircle, Filter, Network } from "lucide-react"
+import { PageHeader } from "../../components/ui/PageHeader"
+import { EmptyState } from "../../components/ui/EmptyState"
+import { MetadataRow } from "../../components/ui/MetadataRow"
+import { Plus, Search, Briefcase, LayoutList, Calendar, CheckCircle2, Clock, Inbox, PlayCircle, Network } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog"
 import { useProjectsStore } from "../../store/projectsStore"
 import { useKnowledgeStore } from "../../store/knowledgeStore"
 import { ProjectStatus } from "../../types"
 import { cn } from "../../utils/cn"
-import { scanTextForEntities, autoLinkSingleEntity } from "../../utils/autoLinker"
+import { autoLinkSingleEntity } from "../../utils/autoLinker"
 
 export function ProjectsPage() {
   const navigate = useNavigate()
@@ -73,17 +75,6 @@ export function ProjectsPage() {
     { id: 'completed', label: 'Selesai', icon: CheckCircle2 },
   ];
 
-  const getStatusColor = (status: ProjectStatus) => {
-    switch (status) {
-      case 'active': return 'text-gray-900 bg-gray-100 border-gray-300';
-      case 'completed': return 'text-gray-900 bg-gray-100 border-gray-300';
-      case 'planned': return 'text-gray-700 bg-gray-50 border-gray-200';
-      case 'review': return 'text-gray-800 bg-gray-100 border-gray-200';
-      case 'archived': return 'text-gray-500 bg-gray-50 border-gray-200';
-      default: return 'text-gray-700 bg-gray-50 border-gray-200';
-    }
-  }
-
   const getStatusLabel = (status: ProjectStatus) => {
     switch (status) {
       case 'active': return 'Aktif';
@@ -97,21 +88,19 @@ export function ProjectsPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 w-full min-w-0 pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 font-display">Proyek</h1>
-          <p className="text-gray-500 mt-1 text-xs sm:text-sm max-w-xl leading-relaxed">
-            Kelola inisiatif pembelajaran Anda, capai tujuan, dan atur tugas-tugas kompleks dalam satu tempat.
-          </p>
-        </div>
-        <Button className="w-full sm:w-auto gap-2 shrink-0 h-11 sm:h-9" onClick={() => setIsAddOpen(true)}>
-          <Plus className="w-4 h-4" />
-          <span>Proyek Baru</span>
-        </Button>
-      </div>
+      <PageHeader
+        title="Proyek"
+        description="Kelola inisiatif pembelajaran, target pencapaian, dan daftar tugas dalam satu alur terstruktur."
+        actions={
+          <Button className="w-full sm:w-auto gap-2" onClick={() => setIsAddOpen(true)}>
+            <Plus className="w-4 h-4" />
+            <span>Proyek Baru</span>
+          </Button>
+        }
+      />
 
       <div className="space-y-3 border-b border-gray-200 pb-4">
-        <div className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-xl px-3 h-11 w-full focus-within:ring-2 focus-within:ring-gray-900 focus-within:border-transparent transition-all"> 
+        <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-3 h-11 w-full focus-within:ring-2 focus-within:ring-gray-900 focus-within:border-transparent transition-all"> 
            <Search className="w-4 h-4 text-gray-400 shrink-0" />
            <input 
                type="text" 
@@ -125,10 +114,11 @@ export function ProjectsPage() {
         <div className="flex items-center gap-1.5 overflow-x-auto w-full no-scrollbar py-1 scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0">
           {tabs.map(tab => (
             <button
+              type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
+                "flex items-center gap-2 px-3.5 min-h-[44px] sm:min-h-0 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer",
                 activeTab === tab.id 
                   ? "bg-gray-900 text-white shadow-sm font-semibold" 
                   : "bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 active:bg-gray-100"
@@ -143,86 +133,82 @@ export function ProjectsPage() {
 
       <div className="grid grid-cols-1 gap-6">
         {projects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50/50">
-             <div className="w-16 h-16 bg-white shadow-sm rounded-2xl flex items-center justify-center mb-6 text-gray-400 border border-gray-100">
-               <Briefcase className="w-8 h-8" />
-             </div>
-             <h3 className="text-lg font-semibold text-gray-900">Belum ada proyek aktif</h3>
-             <p className="text-sm text-gray-500 mt-2 mb-6 max-w-sm leading-relaxed">
-               Mulai inisiatif baru untuk memecah tujuan besar Anda menjadi tugas yang dapat ditindaklanjuti.
-             </p>
-             <Button onClick={() => setIsAddOpen(true)} className="gap-2">
-               <Plus className="w-4 h-4" />
-               Buat Proyek Pertama
-             </Button>
-          </div>
+          <EmptyState
+            icon={Briefcase}
+            title="Belum ada proyek aktif"
+            description="Mulai inisiatif baru untuk memecah tujuan belajar besar menjadi tugas yang dapat ditindaklanjuti."
+            action={
+              <Button onClick={() => setIsAddOpen(true)} className="gap-2">
+                <Plus className="w-4 h-4" />
+                Buat Proyek Pertama
+              </Button>
+            }
+          />
         ) : filteredProjects.length === 0 ? (
-           <div className="text-center py-16 text-gray-500">
-             Tidak ada proyek yang sesuai dengan pencarian atau filter saat ini.
-           </div>
+          <EmptyState
+            compact
+            icon={Search}
+            title="Proyek tidak ditemukan"
+            description="Tidak ada proyek yang sesuai dengan kata kunci atau filter status saat ini."
+          />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {filteredProjects.map(project => {
               const projectTasks = tasks.filter(t => t.projectId === project.id);
               const doneTasks = projectTasks.filter(t => t.status === 'done').length;
               const totalTasks = projectTasks.length;
               const progressPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
-              
+              const relCount = relations.filter(r => r.sourceNodeId === project.id || r.targetNodeId === project.id).length;
               const isOverdue = project.dueDate && project.dueDate < Date.now() && project.status !== 'completed';
               
               return (
-                <div key={project.id} onClick={() => navigate(`/projects/${project.id}`)} className="group border border-gray-200 rounded-2xl bg-white p-6 hover:shadow-md hover:border-gray-300 transition-all cursor-pointer flex flex-col relative overflow-hidden">
+                <div key={project.id} onClick={() => navigate(`/projects/${project.id}`)} className="group border border-gray-200 rounded-2xl bg-white p-5 hover:shadow-sm hover:border-gray-300 transition-all cursor-pointer flex flex-col relative overflow-hidden">
                   {(project.status === 'active' || progressPct > 0) && (
-                    <div className="absolute top-0 left-0 right-0 h-1.5 bg-gray-100 z-10">
-                      <div className={cn("h-full transition-all duration-500", project.status === 'completed' ? 'bg-gray-500' : 'bg-gray-500')} style={{ width: `${progressPct}%` }} />
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-gray-100 z-10">
+                      <div className="h-full bg-gray-900 transition-all duration-500" style={{ width: `${progressPct}%` }} />
                     </div>
                   )}
                   
-                  <div className="flex items-start justify-between mb-4 mt-2">
-                    <span className={cn("inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md border", getStatusColor(project.status))}>
-                      {getStatusLabel(project.status)}
-                    </span>
-                    <button className="text-gray-400 hover:text-gray-900 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <MoreVertical className="w-4 h-4" />
-                    </button>
+                  <div className="mb-3 mt-1 space-y-1">
+                    <h3 className="text-base font-bold text-gray-900 leading-snug line-clamp-2 font-display">{project.title}</h3>
+                    <MetadataRow
+                      items={[
+                        <span className={project.status === 'active' || project.status === 'completed' ? "text-gray-900 font-semibold" : "text-gray-500"}>
+                          {getStatusLabel(project.status)}
+                        </span>,
+                        `${progressPct}%`,
+                      ]}
+                    />
                   </div>
                   
-                  <h3 className="text-lg font-bold text-gray-900 leading-tight mb-2 group-hover:text-gray-900 transition-colors line-clamp-2">{project.title}</h3>
-                  <p className="text-sm text-gray-600 line-clamp-3 flex-1 mb-6 leading-relaxed">{project.description || "Tidak ada deskripsi."}</p>
+                  <p className="text-sm text-gray-600 line-clamp-3 flex-1 mb-5 leading-relaxed">{project.description || "Belum ada deskripsi."}</p>
                   
-                  <div className="flex flex-col gap-3 mt-auto pt-4 border-t border-gray-100">
-                    <div className="flex items-center justify-between text-xs text-gray-500 font-medium">
-                      <span className="flex items-center gap-1.5">
-                        <LayoutList className="w-3.5 h-3.5 text-gray-400" /> {doneTasks}/{totalTasks} Tugas Selesai
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {(() => {
-                          const relCount = relations.filter(r => r.sourceNodeId === project.id || r.targetNodeId === project.id).length;
-                          if (relCount === 0) return null;
-                          return (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
-                              <Network className="w-2.5 h-2.5" /> {relCount}
-                            </span>
-                          );
-                        })()}
-                        <span>{progressPct}%</span>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center justify-between text-xs text-gray-400 font-medium pt-1">
-                      {project.dueDate ? (
-                        <span className={cn("flex items-center gap-1.5", isOverdue ? 'text-gray-900' : 'text-gray-500')}>
-                          <Calendar className="w-3.5 h-3.5" /> 
-                          {isOverdue ? 'Terlewat: ' : 'Tenggat: '}
-                          {new Date(project.dueDate).toLocaleDateString()}
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1.5 text-gray-400">
-                          <Calendar className="w-3.5 h-3.5 opacity-50" /> Tanpa tenggat
-                        </span>
-                      )}
-                      <span className="text-[10px] uppercase tracking-wider">Diperbarui {new Date(project.updatedAt).toLocaleDateString()}</span>
-                    </div>
+                  <div className="flex flex-col gap-2 mt-auto pt-3.5 border-t border-gray-100">
+                    <MetadataRow
+                      items={[
+                        <span className="inline-flex items-center gap-1">
+                          <LayoutList className="w-3 h-3" /> {doneTasks}/{totalTasks} tugas
+                        </span>,
+                        relCount > 0 && (
+                          <span className="inline-flex items-center gap-1 text-gray-700">
+                            <Network className="w-3 h-3" /> {relCount} relasi
+                          </span>
+                        ),
+                      ]}
+                    />
+
+                    <MetadataRow
+                      items={[
+                        project.dueDate ? (
+                          <span className={cn("inline-flex items-center gap-1", isOverdue ? "text-gray-900 font-semibold" : "text-gray-500")}>
+                            <Calendar className="w-3 h-3" />
+                            {isOverdue ? 'Terlewat ' : 'Tenggat '}
+                            {new Date(project.dueDate).toLocaleDateString('id-ID')}
+                          </span>
+                        ) : 'Tanpa tenggat',
+                        `Diperbarui ${new Date(project.updatedAt).toLocaleDateString('id-ID')}`,
+                      ]}
+                    />
                   </div>
                 </div>
               );

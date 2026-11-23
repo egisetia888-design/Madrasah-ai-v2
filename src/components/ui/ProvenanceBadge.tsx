@@ -18,7 +18,7 @@ export function ProvenanceBadge({ relation, className = "" }: ProvenanceBadgePro
 
   if (relation.createdBy === 'user') {
     return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 ${className}`}>
+      <span className={`text-[11px] font-mono text-gray-500 ${className}`}>
         Manual
       </span>
     );
@@ -26,19 +26,20 @@ export function ProvenanceBadge({ relation, className = "" }: ProvenanceBadgePro
 
   if (relation.verifiedBySystem) {
     return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 ${className}`}>
-        AI &middot; dikonfirmasi
+      <span className={`text-[11px] font-mono text-gray-500 ${className}`}>
+        AI · terverifikasi
       </span>
     );
   }
 
   return (
-    <span 
+    <button
+      type="button"
       onClick={handleConfirm}
-      className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-200 text-gray-800 cursor-pointer hover:bg-gray-300 transition-colors ${className}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-mono font-medium bg-gray-100 border border-gray-200 text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors ${className}`}
       title="Ketuk untuk mengonfirmasi relasi ini"
     >
-      AI &middot; belum diverifikasi
-    </span>
+      AI · perlu verifikasi
+    </button>
   );
 }

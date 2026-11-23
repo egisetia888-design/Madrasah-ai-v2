@@ -32,17 +32,8 @@ export function ExportLiteraryModal({
   const wordCount = currentContent.split(/\s+/).filter((w) => w.length > 0).length;
   const readingTime = Math.max(1, Math.ceil(wordCount / 200));
 
-  // 1. Ekspor Naskah Bersih ke Print Window (Untuk Simpan PDF / Cetak Tipografis)
+  // 1. Ekspor Naskah Bersih ke Print Iframe (Untuk Simpan PDF / Cetak Tipografis tanpa pop-up)
   const handlePrintCleanPdf = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      addToast({
-        type: 'error',
-        message: 'Gagal membuka jendela cetak. Pastikan pop-up diizinkan di peramban Anda.',
-      });
-      return;
-    }
-
     const fontStyle =
       fontFamily === 'serif'
         ? "font-family: Georgia, Cambria, 'Times New Roman', Times, serif;"
@@ -147,20 +138,53 @@ export function ExportLiteraryModal({
   <div class="footer">
     Dicetak dari Madrasah — Personal Knowledge Operating System
   </div>
-
-  <script>
-    window.addEventListener('load', () => {
-      setTimeout(() => {
-        window.print();
-      }, 300);
-    });
-  </script>
 </body>
 </html>`;
 
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(iframe);
+
+    const frameDoc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (!frameDoc) {
+      document.body.removeChild(iframe);
+      addToast({
+        type: 'error',
+        message: 'Gagal menyiapkan dokumen cetak.',
+      });
+      return;
+    }
+
+    frameDoc.open();
+    frameDoc.write(html);
+    frameDoc.close();
+
+    const cleanup = () => {
+      if (iframe.parentNode) {
+        iframe.parentNode.removeChild(iframe);
+      }
+    };
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch {
+        addToast({
+          type: 'error',
+          message: 'Tidak dapat memicu dialog cetak peramban.',
+        });
+      } finally {
+        setTimeout(cleanup, 1000);
+      }
+    }, 250);
+
     onClose();
   };
 

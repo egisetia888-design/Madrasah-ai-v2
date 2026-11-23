@@ -1,9 +1,11 @@
 import { fetchWithAuth } from '../../lib/api';
-import { SyncStatusIndicator } from '../../components/ui/SyncStatusIndicator';
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "../../components/ui/Button"
-import { Plus, Search, Map, Milestone, MoreVertical, Sparkles, Upload } from "lucide-react"
+import { PageHeader } from "../../components/ui/PageHeader"
+import { EmptyState } from "../../components/ui/EmptyState"
+import { MetadataRow } from "../../components/ui/MetadataRow"
+import { Plus, Search, Milestone, Sparkles, Upload } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../../components/ui/Dialog"
 import { useCurriculumStore } from "../../store/curriculumStore"
 import { useToastStore } from "../../store/toastStore"
@@ -111,28 +113,28 @@ export function CurriculumPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 w-full min-w-0 pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 font-display">Kurikulum</h1>
-          <p className="text-gray-500 mt-1 text-xs sm:text-sm">Kelola peta jalan belajar dan progres Anda.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          <Button variant="outline" className="gap-2 h-11 sm:h-9 border-gray-200 text-gray-700 hover:bg-gray-50" onClick={() => setIsImportOpen(true)}>
-            <Upload className="w-4 h-4 text-gray-500" />
-            <span>Impor Silabus</span>
-          </Button>
-          <Button variant="outline" className="gap-2 h-11 sm:h-9 border-gray-200 text-gray-700 hover:bg-gray-50" onClick={() => setIsAiOpen(true)}>
-            <Sparkles className="w-4 h-4 text-gray-700" />
-            <span>AI Planner</span>
-          </Button>
-          <Button className="gap-2 h-11 sm:h-9 bg-gray-900 text-white hover:bg-gray-800" onClick={() => setIsAddOpen(true)}>
-            <Plus className="w-4 h-4" />
-            <span>Kurikulum Baru</span>
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Kurikulum"
+        description="Kelola peta jalan belajar, fase penguasaan, dan kompetensi Anda."
+        actions={
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <Button variant="outline" className="gap-2 border-gray-200 text-gray-700 hover:bg-gray-50" onClick={() => setIsImportOpen(true)}>
+              <Upload className="w-4 h-4 text-gray-500" />
+              <span>Impor Silabus</span>
+            </Button>
+            <Button variant="outline" className="gap-2 border-gray-200 text-gray-700 hover:bg-gray-50" onClick={() => setIsAiOpen(true)}>
+              <Sparkles className="w-4 h-4 text-gray-700" />
+              <span>AI Planner</span>
+            </Button>
+            <Button className="gap-2 bg-gray-900 text-white hover:bg-gray-800" onClick={() => setIsAddOpen(true)}>
+              <Plus className="w-4 h-4" />
+              <span>Kurikulum Baru</span>
+            </Button>
+          </div>
+        }
+      />
 
-      <div className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-xl px-3 h-11 w-full max-w-full sm:max-w-md focus-within:ring-2 focus-within:ring-gray-900 transition-all">
+      <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-3 h-11 w-full max-w-full sm:max-w-md focus-within:ring-2 focus-within:ring-gray-900 transition-all">
          <Search className="w-4 h-4 text-gray-400 shrink-0" />
          <input 
             type="text" 
@@ -145,23 +147,26 @@ export function CurriculumPage() {
 
       <div className="grid grid-cols-1 gap-6">
         {paths.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed border-gray-200 rounded-xl bg-gray-50/30">
-             <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-4 text-gray-400">
-               <Milestone className="w-6 h-6" />
-             </div>
-             <h3 className="text-sm font-medium text-gray-900">Belum ada kurikulum</h3>
-             <p className="text-sm text-gray-500 mt-1 mb-4 max-w-sm">
-               Buat kurikulum untuk menyusun perjalanan belajar Anda ke dalam fase dan kompetensi.
-             </p>
-             <Button variant="outline" size="sm" className="gap-2" onClick={() => setIsAddOpen(true)}>
-               <Plus className="w-3.5 h-3.5" />
-               Buat Kurikulum
-             </Button>
-          </div>
+          <EmptyState
+            icon={Milestone}
+            title="Belum ada kurikulum"
+            description="Buat kurikulum untuk menyusun perjalanan belajar Anda ke dalam fase dan kompetensi terukur."
+            action={
+              <Button className="gap-2" onClick={() => setIsAddOpen(true)}>
+                <Plus className="w-4 h-4" />
+                Buat Kurikulum
+              </Button>
+            }
+          />
         ) : filteredPaths.length === 0 ? (
-           <div className="text-center py-12 text-gray-500">Tidak ada kurikulum yang cocok dengan pencarian.</div>
+          <EmptyState
+            compact
+            icon={Search}
+            title="Kurikulum tidak ditemukan"
+            description="Tidak ada kurikulum yang sesuai dengan kata kunci pencarian Anda."
+          />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredPaths.map(path => {
               const pathPhases = phases.filter(ph => ph.pathId === path.id);
               const pathComps = competencies.filter(c => pathPhases.some(ph => ph.id === c.phaseId));
@@ -170,20 +175,22 @@ export function CurriculumPage() {
               const progressPct = totalComps > 0 ? Math.round((doneComps / totalComps) * 100) : 0;
               
               return (
-                <div key={path.id} onClick={() => navigate(`/curriculum/${path.id}`)} className="group border border-gray-200 rounded-xl bg-white p-5 hover:shadow-sm transition-shadow cursor-pointer flex flex-col h-40 relative overflow-hidden">
+                <div key={path.id} onClick={() => navigate(`/curriculum/${path.id}`)} className="group border border-gray-200 rounded-2xl bg-white p-5 hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer flex flex-col min-h-[10.5rem] relative overflow-hidden">
                   <div className="absolute bottom-0 left-0 h-1 bg-gray-100 w-full">
-                     <div className="h-full bg-gray-500 transition-all duration-500" style={{ width: `${progressPct}%` }} />
+                     <div className="h-full bg-gray-900 transition-all duration-500" style={{ width: `${progressPct}%` }} />
                   </div>
-                  <div className="flex items-start justify-between mb-2">
-                    <h3 className="font-semibold text-gray-900 line-clamp-1 flex-1 pr-2">{path.title}</h3>
-                    <button className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-900 shrink-0">
-                      <MoreVertical className="w-4 h-4" />
-                    </button>
+                  <div className="mb-2">
+                    <h3 className="font-semibold text-gray-900 line-clamp-1 font-display">{path.title}</h3>
                   </div>
-                  <p className="text-sm text-gray-600 line-clamp-2 flex-1 mb-4">{path.description || "Tidak ada deskripsi"}</p>
-                  <div className="flex items-center justify-between text-xs text-gray-400 mt-auto pt-4 border-t border-gray-50">
-                    <span>{new Date(path.updatedAt).toLocaleDateString()}</span>
-                    <span className="font-medium text-gray-500">{progressPct}% Selesai</span>
+                  <p className="text-sm text-gray-600 line-clamp-2 flex-1 mb-4 leading-relaxed">{path.description || "Belum ada deskripsi."}</p>
+                  <div className="mt-auto pt-3 border-t border-gray-100">
+                    <MetadataRow
+                      items={[
+                        `${doneComps}/${totalComps} kompetensi`,
+                        `${progressPct}% selesai`,
+                        new Date(path.updatedAt).toLocaleDateString('id-ID'),
+                      ]}
+                    />
                   </div>
                 </div>
               )
@@ -233,8 +240,8 @@ export function CurriculumPage() {
       <Dialog open={isAiOpen} onOpenChange={setIsAiOpen}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-gray-900 animate-pulse" />
-            AI Syllabus Planner
+            <Sparkles className="w-5 h-5 text-gray-900" />
+            Perencana Silabus AI
           </DialogTitle>
         </DialogHeader>
         <form className="flex flex-col flex-1 min-h-0 overflow-hidden" onSubmit={handleGenerateAi}>

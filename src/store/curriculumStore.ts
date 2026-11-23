@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { LearningPath, Phase, Competency } from '../types';
 import { createSyncMetadata, updateSyncMetadata } from './syncUtils';
-import { syncSaveLearningPath, syncDeleteLearningPath, syncSavePhase, syncDeletePhase, syncSaveCompetency, syncDeleteCompetency } from '../lib/firestoreSync';
 import { SyncMetadata } from '../types';
 import { createIndexedDbStorage } from './indexedDbStorage';
 
@@ -31,98 +30,74 @@ export const useCurriculumStore = create<CurriculumState>()(
       
       addPath: (pathData) => {
         const newPath = {
-            ...pathData,
-            id: pathData.id || crypto.randomUUID(),
-            createdAt: Date.now(),
-            ...createSyncMetadata(),
+          ...pathData,
+          id: pathData.id || crypto.randomUUID(),
+          createdAt: Date.now(),
+          ...createSyncMetadata(),
         };
         set((state) => ({
           paths: [newPath, ...state.paths]
         }));
-        syncSaveLearningPath(newPath);
       },
       
-      updatePath: (id, updates) => set((state) => {
-        const updatedPaths = state.paths.map(p => {
-          if (p.id === id) {
-            const updated = { ...p, ...updates, ...updateSyncMetadata(p) };
-            syncSaveLearningPath(updated);
-            return updated;
-          }
-          return p;
-        });
-        return { paths: updatedPaths };
-      }),
+      updatePath: (id, updates) => set((state) => ({
+        paths: state.paths.map(p =>
+          p.id === id ? { ...p, ...updates, ...updateSyncMetadata(p) } : p
+        )
+      })),
 
       deletePath: (id) => {
         set((state) => ({
           paths: state.paths.filter(p => p.id !== id),
           phases: state.phases.filter(ph => ph.pathId !== id)
         }));
-        syncDeleteLearningPath(id);
       },
 
       addPhase: (phase) => {
         const newPhase = {
-            ...phase,
-            id: phase.id || crypto.randomUUID(),
-            ...createSyncMetadata(),
+          ...phase,
+          id: phase.id || crypto.randomUUID(),
+          ...createSyncMetadata(),
         };
         set((state) => ({
           phases: [...state.phases, newPhase]
         }));
-        syncSavePhase(newPhase);
       },
 
-      updatePhase: (id, updates) => set((state) => {
-        const updatedPhases = state.phases.map(ph => {
-          if (ph.id === id) {
-            const updated = { ...ph, ...updates, ...updateSyncMetadata(ph) };
-            syncSavePhase(updated);
-            return updated;
-          }
-          return ph;
-        });
-        return { phases: updatedPhases };
-      }),
+      updatePhase: (id, updates) => set((state) => ({
+        phases: state.phases.map(ph =>
+          ph.id === id ? { ...ph, ...updates, ...updateSyncMetadata(ph) } : ph
+        )
+      })),
 
       deletePhase: (id) => {
         set((state) => ({
           phases: state.phases.filter(ph => ph.id !== id),
           competencies: state.competencies.filter(c => c.phaseId !== id)
         }));
-        syncDeletePhase(id);
       },
 
       addCompetency: (comp) => {
         const newComp = {
-            ...comp,
-            id: crypto.randomUUID(),
-            ...createSyncMetadata(),
+          ...comp,
+          id: crypto.randomUUID(),
+          ...createSyncMetadata(),
         };
         set((state) => ({
           competencies: [...state.competencies, newComp]
         }));
-        syncSaveCompetency(newComp);
       },
 
-      updateCompetency: (id, updates) => set((state) => {
-        const updatedComps = state.competencies.map(c => {
-          if (c.id === id) {
-            const updated = { ...c, ...updates, ...updateSyncMetadata(c) };
-            syncSaveCompetency(updated);
-            return updated;
-          }
-          return c;
-        });
-        return { competencies: updatedComps };
-      }),
+      updateCompetency: (id, updates) => set((state) => ({
+        competencies: state.competencies.map(c =>
+          c.id === id ? { ...c, ...updates, ...updateSyncMetadata(c) } : c
+        )
+      })),
 
       deleteCompetency: (id) => {
         set((state) => ({
           competencies: state.competencies.filter(c => c.id !== id)
         }));
-        syncDeleteCompetency(id);
       },
     }),
     {

@@ -1,21 +1,11 @@
 export type UUID = string;
 
-export type SyncStatus = 'local_only' | 'pending_sync' | 'syncing' | 'synced' | 'conflict' | 'failed';
-
-export interface ConflictData {
-  detectedAt: number;
-  localRevision: number;
-  remoteRevision: number;
-  remoteData: any;
-  reason: 'concurrent_edit' | 'stale_local';
-  resolution?: 'local_wins' | 'remote_wins' | 'manual_merge';
-}
+export type SyncStatus = 'local_only' | 'saved';
 
 export interface SyncMetadata {
   revision: number;
   updatedAt: number;
   syncStatus: SyncStatus;
-  conflict?: ConflictData;
 }
 
 export interface Author extends SyncMetadata {
@@ -37,6 +27,7 @@ export interface Book extends SyncMetadata {
   title: string;
   authorId: UUID | null;
   categoryId: UUID | null;
+  isbn?: string;
   status: BookStatus;
   progress: number;
   totalPages?: number;
@@ -56,10 +47,28 @@ export interface ReadingLog extends SyncMetadata {
   createdAt: number;
 }
 
+export interface BookCandidate {
+  id: string;
+  title: string;
+  author?: string;
+  isbn?: string;
+  totalPages: number;
+  coverUrl: string;
+  publisher?: string;
+  publishedYear?: string;
+  source: 'Open Library' | 'Google Books' | 'Penelusuran AI';
+  isEstimated: boolean;
+  matchScore?: number;
+}
+
 export interface BookInfoResponse {
   totalPages: number;
   coverUrl: string;
   isEstimated: boolean;
+  author?: string;
+  isbn?: string;
+  title?: string;
+  candidates?: BookCandidate[];
 }
 
 export type NoteType = 'fleeting' | 'literature' | 'permanent' | 'knowledge' | 'project' | 'writing' | 'personal' | 'research';
