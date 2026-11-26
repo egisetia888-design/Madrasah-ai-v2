@@ -129,6 +129,9 @@ export function KnowledgeGraphPage() {
         return {
           node,
           edgeLabel: e.label,
+          edgeCreatedBy: e.createdBy,
+          edgeVerified: e.verifiedBySystem,
+          edgeConfidence: e.confidenceScore,
           direction: isOutgoing ? ('outgoing' as const) : ('incoming' as const),
           relation
         };
@@ -667,20 +670,22 @@ export function KnowledgeGraphPage() {
                 ) : (
                   <div className="flex flex-col gap-2">
                     {selectedNodeConnections.slice(0, 10).map((conn, idx) => (
-                      <button
-                        type="button"
+                      <div
                         key={`${conn.node?.id}-${idx}`}
-                        onClick={() => setSelectedNodeId(conn.node!.id)}
-                        className="flex flex-col p-3 rounded-xl border border-gray-100 hover:border-gray-300 hover:bg-gray-50/70 transition-all text-left group bg-white cursor-pointer"
+                        className="flex flex-col p-3 rounded-xl border border-gray-100 hover:border-gray-300 hover:bg-gray-50/70 transition-all text-left group bg-white"
                       >
-                        <div className="flex items-center justify-between w-full mb-1 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedNodeId(conn.node!.id)}
+                          className="flex items-center justify-between w-full mb-1 gap-2 text-left cursor-pointer min-h-[36px] sm:min-h-0"
+                        >
                           <div className="flex items-center gap-2 min-w-0">
                             {getTypeIcon(conn.node!.type)}
                             <span className="text-sm text-gray-900 font-medium truncate group-hover:text-black">
                               {conn.node?.label}
                             </span>
                           </div>
-                        </div>
+                        </button>
                         <div className="pl-6 flex flex-wrap items-center gap-x-2 gap-y-1">
                           <MetadataRow
                             items={[
@@ -688,9 +693,15 @@ export function KnowledgeGraphPage() {
                               conn.edgeLabel ? conn.edgeLabel.replace('_', ' ') : (conn.direction === 'outgoing' ? 'arah keluar' : 'arah masuk'),
                             ]}
                           />
-                          {conn.relation && <ProvenanceBadge relation={conn.relation} />}
+                          {conn.relation ? (
+                            <ProvenanceBadge relation={conn.relation} />
+                          ) : conn.edgeCreatedBy === 'ai_agent' && !conn.edgeVerified ? (
+                            <span className="text-[11px] font-mono text-gray-500 tabular-nums">
+                              AI · deteksi otomatis{typeof conn.edgeConfidence === 'number' ? ` · ${Math.round(conn.edgeConfidence * 100)}%` : ''}
+                            </span>
+                          ) : null}
                         </div>
-                      </button>
+                      </div>
                     ))}
                     {selectedNodeConnections.length > 10 && (
                       <p className="text-xs text-gray-400 text-center pt-2 font-mono tabular-nums">+{selectedNodeConnections.length - 10} relasi lainnya</p>

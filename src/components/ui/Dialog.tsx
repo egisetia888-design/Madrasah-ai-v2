@@ -18,7 +18,11 @@ export function Dialog({ open, onOpenChange, children, maxWidthClass = "max-w-lg
         className="fixed inset-0 bg-black/45 backdrop-blur-[4px] transition-opacity duration-300"
         onClick={() => onOpenChange(false)}
       />
-      <div className={cn(`relative z-[100] w-full bg-white rounded-2xl shadow-2xl border border-gray-100 animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90dvh] overflow-hidden`, maxWidthClass)}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={cn(`relative z-[100] w-full bg-white rounded-2xl shadow-2xl border border-gray-100 animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90dvh] overflow-hidden`, maxWidthClass)}
+      >
         <button
           onClick={() => onOpenChange(false)}
           className="absolute right-2.5 top-2.5 sm:right-4 sm:top-4 rounded-xl min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1.5 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition-colors cursor-pointer z-[100]"
@@ -58,7 +62,7 @@ export function DialogContent({ className, children, ...props }: React.HTMLAttri
 
 export function DialogFooter({ className, children, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 p-5 sm:p-6 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl shrink-0 gap-2 sm:gap-0", className)} {...props}>
+    <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 p-4 sm:px-6 sm:py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl shrink-0 gap-2 sm:gap-0", className)} {...props}>
       {children}
     </div>
   )

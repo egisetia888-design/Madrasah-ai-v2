@@ -7,33 +7,57 @@ env.allowLocalModels = false;
 
 interface SemanticSearchState {
   isModelLoading: boolean;
+  modelError: string | null;
   setIsModelLoading: (loading: boolean) => void;
+  setModelError: (error: string | null) => void;
 }
 
 export const useSemanticSearchStore = create<SemanticSearchState>((set) => ({
   isModelLoading: false,
+  modelError: null,
   setIsModelLoading: (loading: boolean) => set({ isModelLoading: loading }),
+  setModelError: (error: string | null) => set({ modelError: error }),
 }));
 
 let embedder: any = null;
+let embedderPromise: Promise<any> | null = null;
 
 export async function getEmbedder() {
-  if (!embedder) {
-    useSemanticSearchStore.getState().setIsModelLoading(true);
-    try {
-      // Using a small, efficient model: all-MiniLM-L6-v2
-      // It's ~23MB in ONNX format
-      embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-    } finally {
+  if (embedder) return embedder;
+  if (embedderPromise) return embedderPromise;
+
+  const store = useSemanticSearchStore.getState();
+  store.setIsModelLoading(true);
+  store.setModelError(null);
+
+  embedderPromise = pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
+    .then((loaded) => {
+      embedder = loaded;
+      return loaded;
+    })
+    .catch((err: unknown) => {
+      const msg =
+        err instanceof Error && err.message
+          ? `Model semantik lokal gagal dimuat (${err.message}). Pastikan koneksi tersedia pada unduhan pertama.`
+          : 'Model semantik lokal gagal dimuat di peramban.';
+      useSemanticSearchStore.getState().setModelError(msg);
+      throw err;
+    })
+    .finally(() => {
+      embedderPromise = null;
       useSemanticSearchStore.getState().setIsModelLoading(false);
-    }
-  }
-  return embedder;
+    });
+
+  return embedderPromise;
 }
 
 export async function generateEmbedding(text: string): Promise<number[]> {
+  const clean = text.trim();
+  if (!clean) {
+    return [];
+  }
   const model = await getEmbedder();
-  const output = await model(text, { pooling: 'mean', normalize: true });
+  const output = await model(clean, { pooling: 'mean', normalize: true });
   return Array.from(output.data);
 }
 
@@ -58,19 +82,23 @@ export interface SemanticSearchResult {
   similarity: number;
 }
 
-export async function searchSemantic(query: string, items: { id: string, embedding?: number[] }[]): Promise<SemanticSearchResult[]> {
+export async function searchSemantic(
+  query: string,
+  items: { id: string; embedding?: number[] }[],
+  threshold = 0.38
+): Promise<SemanticSearchResult[]> {
   if (!query.trim()) return [];
-  
+  const validItems = items.filter((item) => Array.isArray(item.embedding) && item.embedding.length > 0);
+  if (validItems.length === 0) return [];
+
   const queryEmbedding = await generateEmbedding(query);
-  
-  const results = items
-    .filter(item => item.embedding && item.embedding.length > 0)
-    .map(item => ({
+  if (queryEmbedding.length === 0) return [];
+
+  return validItems
+    .map((item) => ({
       id: item.id,
-      similarity: cosineSimilarity(queryEmbedding, item.embedding!)
+      similarity: cosineSimilarity(queryEmbedding, item.embedding!),
     }))
-    .sort((a, b) => b.similarity - a.similarity)
-    .filter(res => res.similarity > 0.5); // Threshold for relevance
-    
-  return results;
+    .filter((res) => res.similarity >= threshold)
+    .sort((a, b) => b.similarity - a.similarity);
 }

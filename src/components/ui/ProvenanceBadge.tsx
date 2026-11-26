@@ -13,7 +13,10 @@ export function ProvenanceBadge({ relation, className = "" }: ProvenanceBadgePro
   const handleConfirm = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    updateRelation(relation.id, { verifiedBySystem: true });
+    updateRelation(relation.id, {
+      verifiedBySystem: true,
+      verifiedAt: Date.now(),
+    });
   };
 
   if (relation.createdBy === 'user') {
@@ -24,10 +27,15 @@ export function ProvenanceBadge({ relation, className = "" }: ProvenanceBadgePro
     );
   }
 
+  const confidencePct =
+    typeof relation.confidenceScore === 'number' && Number.isFinite(relation.confidenceScore)
+      ? Math.round(Math.min(1, Math.max(0, relation.confidenceScore)) * 100)
+      : null;
+
   if (relation.verifiedBySystem) {
     return (
-      <span className={`text-[11px] font-mono text-gray-500 ${className}`}>
-        AI · terverifikasi
+      <span className={`text-[11px] font-mono text-gray-500 tabular-nums ${className}`}>
+        AI · terverifikasi{confidencePct !== null ? ` · ${confidencePct}%` : ''}
       </span>
     );
   }
@@ -36,10 +44,10 @@ export function ProvenanceBadge({ relation, className = "" }: ProvenanceBadgePro
     <button
       type="button"
       onClick={handleConfirm}
-      className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-mono font-medium bg-gray-100 border border-gray-200 text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors ${className}`}
-      title="Ketuk untuk mengonfirmasi relasi ini"
+      className={`inline-flex items-center min-h-[36px] sm:min-h-0 px-2.5 py-1 sm:px-2 sm:py-0.5 rounded-lg text-[11px] font-mono font-medium tabular-nums bg-gray-100 border border-gray-200 text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors ${className}`}
+      title="Ketuk satu kali untuk mengonfirmasi relasi AI ini"
     >
-      AI · perlu verifikasi
+      AI · perlu verifikasi{confidencePct !== null ? ` · ${confidencePct}%` : ''}
     </button>
   );
 }

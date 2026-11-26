@@ -173,6 +173,7 @@ export function QuickAddDialog() {
           console.warn('Auto link quote error:', err)
         }
 
+        useNotesStore.getState().indexNote(noteId)
         addToast({ type: 'success', message: 'Catatan literatur tersimpan!' })
         setOpen(false)
       } else if (detectedType === 'idea') {
@@ -192,6 +193,7 @@ export function QuickAddDialog() {
           console.warn('Auto link draft error:', err)
         }
 
+        useWritingStore.getState().indexDraft(draftId)
         addToast({ type: 'success', message: 'Ide tulisan tersimpan di Studio Menulis!' })
         setOpen(false)
       } else {
@@ -214,6 +216,7 @@ export function QuickAddDialog() {
           console.warn('Auto link note error:', err)
         }
 
+        useNotesStore.getState().indexNote(noteId)
         addToast({ type: 'success', message: 'Catatan tersimpan di Kotak Masuk (Otak Kedua)!' })
         setOpen(false)
       }

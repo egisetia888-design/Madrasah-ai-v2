@@ -41,7 +41,17 @@ import {
   requestPersistentStorage,
   validateAndPreviewBackup,
 } from '../../store/indexedDbStorage';
-import { migrateNotesToFragments, backfillUnverifiedAiRelations } from '../../utils/dataMigration';
+import { useKnowledgeStore } from '../../store/knowledgeStore';
+import { useSemanticSearchStore } from '../../lib/semanticSearch';
+import {
+  migrateNotesToFragments,
+  auditAiRelationsWithSummary,
+} from '../../utils/dataMigration';
+import {
+  computeAiRelationBackfillPlan,
+  computeNoteMigrationPlan,
+  computeSemanticCoverage,
+} from '../../utils/dataMigrationLogic';
 
 function formatBytes(bytes: number | null): string {
   if (bytes === null || !Number.isFinite(bytes)) return '—';
@@ -57,8 +67,28 @@ export function SettingsPage() {
   const [mdExportStatus, setMdExportStatus] = useState<string | null>(null);
   const [migrationStatus, setMigrationStatus] = useState<string | null>(null);
   const [aiBackfillStatus, setAiBackfillStatus] = useState<string | null>(null);
-  const [indexStatus, setIndexStatus] = useState<string | null>(null);
+  const [indexStatus, setIndexStatus] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
   const [isIndexing, setIsIndexing] = useState(false);
+
+  const notes = useNotesStore((state) => state.notes);
+  const drafts = useWritingStore((state) => state.drafts);
+  const sourceFragments = useKnowledgeStore((state) => state.sourceFragments);
+  const concepts = useKnowledgeStore((state) => state.concepts);
+  const relations = useKnowledgeStore((state) => state.relations);
+  const semanticModelError = useSemanticSearchStore((state) => state.modelError);
+
+  const semanticCoverage = React.useMemo(
+    () => computeSemanticCoverage(notes, drafts),
+    [notes, drafts]
+  );
+  const migrationPlan = React.useMemo(
+    () => computeNoteMigrationPlan(notes, sourceFragments, relations),
+    [notes, sourceFragments, relations]
+  );
+  const aiAuditMetrics = React.useMemo(
+    () => computeAiRelationBackfillPlan(relations),
+    [relations]
+  );
 
   const startTour = useTourStore((state) => state.startTour);
   const addToast = useToastStore((state) => state.addToast);
@@ -132,13 +162,19 @@ export function SettingsPage() {
 
   const handleAiRelationBackfill = () => {
     try {
-      const count = backfillUnverifiedAiRelations();
-      if (count > 0) {
-        setAiBackfillStatus(`Berhasil menormalkan ${count} relasi AI ke status 'belum diverifikasi'.`);
+      const summary = auditAiRelationsWithSummary();
+      if (summary.normalizedCount > 0) {
+        setAiBackfillStatus(
+          `Menormalkan ${summary.normalizedCount} relasi AI (${summary.pendingAiReviewCount} perlu verifikasi, ${summary.userConfirmedAiCount} terkonfirmasi).`
+        );
+      } else if (summary.totalAiRelations === 0) {
+        setAiBackfillStatus("Belum ada relasi buatan AI — seluruh koneksi berstatus manual.");
       } else {
-        setAiBackfillStatus("Semua relasi AI sudah mematuhi kaidah Ta'dib (tidak ada anomali).");
+        setAiBackfillStatus(
+          `Audit selesai: ${summary.pendingAiReviewCount} perlu verifikasi, ${summary.userConfirmedAiCount} terkonfirmasi pengguna.`
+        );
       }
-      setTimeout(() => setAiBackfillStatus(null), 5000);
+      setTimeout(() => setAiBackfillStatus(null), 6000);
     } catch (err) {
       console.error(err);
       setAiBackfillStatus('Terjadi kesalahan saat memeriksa relasi AI.');
@@ -203,39 +239,76 @@ export function SettingsPage() {
 
   const handleReindex = async () => {
     setIsIndexing(true);
-    setIndexStatus('Menyiapkan pemindai...');
+    setIndexStatus({ type: 'info', text: 'Menyiapkan model vektor lokal...' });
     try {
       const notesStore = useNotesStore.getState();
       const writingStore = useWritingStore.getState();
+      const coverage = computeSemanticCoverage(notesStore.notes, writingStore.drafts);
 
-      const unindexedNotes = notesStore.notes.filter((n) => !n.embedding);
-      const unindexedDrafts = writingStore.drafts.filter((d) => !d.embedding);
-      const total = unindexedNotes.length + unindexedDrafts.length;
-
-      if (total === 0) {
-        setIndexStatus('Semua data sudah terindeks semantik.');
-        setTimeout(() => setIndexStatus(null), 3000);
+      if (coverage.totalItems === 0) {
+        setIndexStatus({ type: 'info', text: 'Belum ada catatan atau draf untuk diindeks.' });
+        setTimeout(() => setIndexStatus(null), 4000);
         return;
       }
 
+      const hasUnindexed =
+        coverage.unindexedNoteIds.length + coverage.unindexedDraftIds.length > 0;
+      const targetNoteIds = hasUnindexed ? coverage.unindexedNoteIds : coverage.allNoteIds;
+      const targetDraftIds = hasUnindexed ? coverage.unindexedDraftIds : coverage.allDraftIds;
+      const total = targetNoteIds.length + targetDraftIds.length;
+
       let processed = 0;
-      for (const note of unindexedNotes) {
-        setIndexStatus(`Mengindeks Catatan (${processed + 1}/${total})...`);
-        await notesStore.indexNote(note.id);
+      let succeeded = 0;
+      let failed = 0;
+
+      for (const noteId of targetNoteIds) {
+        setIndexStatus({
+          type: 'info',
+          text: `Mengindeks Catatan (${processed + 1}/${total})...`,
+        });
+        const ok = await notesStore.indexNote(noteId);
+        if (ok) succeeded++;
+        else failed++;
         processed++;
       }
 
-      for (const draft of unindexedDrafts) {
-        setIndexStatus(`Mengindeks Draf (${processed + 1}/${total})...`);
-        await writingStore.indexDraft(draft.id);
+      for (const draftId of targetDraftIds) {
+        setIndexStatus({
+          type: 'info',
+          text: `Mengindeks Draf (${processed + 1}/${total})...`,
+        });
+        const ok = await writingStore.indexDraft(draftId);
+        if (ok) succeeded++;
+        else failed++;
         processed++;
       }
 
-      setIndexStatus('Indeks semantik berhasil diperbarui!');
-      setTimeout(() => setIndexStatus(null), 3000);
+      const loadError = useSemanticSearchStore.getState().modelError;
+      if (succeeded === 0 && (failed > 0 || loadError)) {
+        setIndexStatus({
+          type: 'error',
+          text: loadError || 'Gagal memuat model atau menyusun vektor untuk seluruh item.',
+        });
+      } else if (failed > 0) {
+        setIndexStatus({
+          type: 'info',
+          text: `${succeeded} entitas terindeks, ${failed} dilewati (teks kosong atau gagal).`,
+        });
+      } else {
+        setIndexStatus({
+          type: 'success',
+          text: hasUnindexed
+            ? `Berhasil mengindeks ${succeeded} entitas baru.`
+            : `Indeks semantik diperbarui (${succeeded} entitas).`,
+        });
+        setTimeout(() => setIndexStatus(null), 4000);
+      }
     } catch (error) {
       console.error('Indexing failed:', error);
-      setIndexStatus('Gagal memperbarui indeks.');
+      setIndexStatus({
+        type: 'error',
+        text: 'Gagal memperbarui indeks semantik lokal.',
+      });
     } finally {
       setIsIndexing(false);
     }
@@ -679,13 +752,21 @@ export function SettingsPage() {
           </div>
           <div className="p-6">
             <div className="flex flex-col md:flex-row gap-6 items-start">
-              <div className="flex-1">
-                <p className="text-sm text-gray-600 mb-3">
+              <div className="flex-1 space-y-2.5">
+                <p className="text-sm text-gray-600">
                   Aplikasi ini menggunakan model vektor <strong>Transformers.js</strong> yang berjalan langsung di peramban Anda untuk pencarian berbasis makna tanpa mengirim catatan ke server.
                 </p>
                 <p className="text-xs text-gray-500">
-                  Catatan yang baru dibuat akan diindeks secara otomatis. Jika Anda baru memulihkan cadangan JSON, lakukan pengindeksan ulang bila diperlukan.
+                  Catatan dan draf baru diindeks otomatis di peramban. Jika Anda baru memulihkan cadangan JSON atau menyunting luring, jalankan pengindeksan ulang di sini.
                 </p>
+                <p className="text-xs font-mono text-gray-600 tabular-nums">
+                  Cakupan indeks: {semanticCoverage.indexedItems}/{semanticCoverage.totalItems} entitas ({semanticCoverage.indexedNotes}/{semanticCoverage.totalNotes} catatan · {semanticCoverage.indexedDrafts}/{semanticCoverage.totalDrafts} draf)
+                </p>
+                {semanticModelError && !indexStatus && (
+                  <p className="text-xs font-mono text-gray-700 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
+                    {semanticModelError}
+                  </p>
+                )}
               </div>
               <div className="w-full md:w-auto shrink-0 space-y-2">
                 <Button
@@ -699,8 +780,13 @@ export function SettingsPage() {
                   {isIndexing ? 'Sedang Mengindeks...' : 'Indeks Ulang Data'}
                 </Button>
                 {indexStatus && (
-                  <p className="text-[11px] text-gray-900 flex items-center gap-1 justify-center md:justify-start">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-gray-500" /> {indexStatus}
+                  <p className="text-[11px] text-gray-900 flex items-start gap-1.5 justify-center md:justify-start max-w-xs">
+                    {indexStatus.type === 'error' ? (
+                      <AlertTriangle className="w-3.5 h-3.5 text-gray-700 shrink-0 mt-0.5" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-gray-500 shrink-0 mt-0.5" />
+                    )}
+                    <span>{indexStatus.text}</span>
                   </p>
                 )}
               </div>
@@ -716,12 +802,15 @@ export function SettingsPage() {
           </div>
           <div className="p-6">
             <div className="flex flex-col md:flex-row gap-6 items-start">
-              <div className="flex-1">
-                <p className="text-sm text-gray-600 mb-3">
+              <div className="flex-1 space-y-2.5">
+                <p className="text-sm text-gray-600">
                   Madrasah mendukung <strong>SourceFragment</strong> dan abstraksi <strong>Konsep</strong> yang berdiri sendiri. Migrasi ini memisahkan kutipan mentah dari catatan lama menjadi fragmen mandiri tanpa menghapus catatan aslinya.
                 </p>
                 <p className="text-xs text-gray-500">
                   Proses ini memperkuat penelusuran rujukan (<em>provenance</em>) agar kutipan dapat dipakai ulang lintas tulisan.
+                </p>
+                <p className="text-xs font-mono text-gray-600 tabular-nums">
+                  Status V2: {migrationPlan.migratedCount} catatan lama menunggu migrasi · {sourceFragments.length} fragmen sumber · {concepts.length} konsep
                 </p>
               </div>
               <div className="w-full md:w-auto shrink-0 space-y-2">
@@ -735,21 +824,25 @@ export function SettingsPage() {
                   Migrasi Data Catatan Lama
                 </Button>
                 {migrationStatus && (
-                  <p className="text-[11px] text-gray-900 flex items-center gap-1 justify-center md:justify-start">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-gray-500" /> {migrationStatus}
+                  <p className="text-[11px] text-gray-900 flex items-start gap-1.5 justify-center md:justify-start max-w-xs">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-gray-500 shrink-0 mt-0.5" />
+                    <span>{migrationStatus}</span>
                   </p>
                 )}
               </div>
             </div>
 
             <div className="mt-6 pt-6 border-t border-gray-100 flex flex-col md:flex-row gap-6 items-start">
-              <div className="flex-1">
-                <h3 className="text-sm font-medium text-gray-900 mb-1">Audit &amp; Backfill Relasi AI (Kaidah Ta&apos;dib)</h3>
-                <p className="text-sm text-gray-600 mb-2">
+              <div className="flex-1 space-y-2">
+                <h3 className="text-sm font-medium text-gray-900">Audit &amp; Backfill Relasi AI (Kaidah Ta&apos;dib)</h3>
+                <p className="text-sm text-gray-600">
                   Memeriksa dan menormalkan seluruh relasi graf yang dibuat oleh AI. Menjamin tidak ada relasi buatan AI yang berstatus terverifikasi sebelum ada konfirmasi eksplisit dari Anda.
                 </p>
                 <p className="text-xs text-gray-500">
-                  Relasi yang belum ditinjau ditandai dengan <span className="font-mono text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded text-[11px]">AI · belum diverifikasi</span> pada Graf dan Catatan.
+                  Relasi yang belum ditinjau ditandai dengan <span className="font-mono text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded text-[11px]">AI · perlu verifikasi</span> pada Graf dan Catatan.
+                </p>
+                <p className="text-xs font-mono text-gray-600 tabular-nums">
+                  Status relasi: {aiAuditMetrics.pendingAiReviewCount} perlu verifikasi · {aiAuditMetrics.userConfirmedAiCount} AI dikonfirmasi · {aiAuditMetrics.manualCount} manual
                 </p>
               </div>
               <div className="w-full md:w-auto shrink-0 space-y-2">
@@ -763,8 +856,9 @@ export function SettingsPage() {
                   Audit Relasi AI
                 </Button>
                 {aiBackfillStatus && (
-                  <p className="text-[11px] text-gray-900 flex items-center gap-1 justify-center md:justify-start">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-gray-500" /> {aiBackfillStatus}
+                  <p className="text-[11px] text-gray-900 flex items-start gap-1.5 justify-center md:justify-start max-w-xs">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-gray-500 shrink-0 mt-0.5" />
+                    <span>{aiBackfillStatus}</span>
                   </p>
                 )}
               </div>

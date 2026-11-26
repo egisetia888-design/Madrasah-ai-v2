@@ -21,7 +21,7 @@ interface NotesState {
 
   addTag: (name: string) => string;
   deleteTag: (id: string) => void;
-  indexNote: (id: string) => Promise<void>;
+  indexNote: (id: string) => Promise<boolean>;
 }
 
 export const useNotesStore = create<NotesState>()(
@@ -105,19 +105,24 @@ export const useNotesStore = create<NotesState>()(
       indexNote: async (id) => {
         const state = get();
         const note = state.notes.find(n => n.id === id);
-        if (!note) return;
+        if (!note) return false;
+
+        const textToEmbed = `${note.title} ${note.content} ${note.rawQuote || ''}`.trim();
+        if (!textToEmbed) return false;
 
         try {
-          const textToEmbed = `${note.title} ${note.content}`;
           const embedding = await generateEmbedding(textToEmbed);
-          
+          if (!Array.isArray(embedding) || embedding.length === 0) return false;
+
           set((state) => ({
             notes: state.notes.map(n =>
               n.id === id ? { ...n, embedding } : n
             )
           }));
+          return true;
         } catch (error) {
           console.error('Failed to index note:', error);
+          return false;
         }
       },
 

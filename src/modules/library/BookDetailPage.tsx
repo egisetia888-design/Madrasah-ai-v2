@@ -23,9 +23,11 @@ export function BookDetailPage() {
   
   const books = useLibraryStore(state => state.books);
   const authors = useLibraryStore(state => state.authors);
+  const categories = useLibraryStore(state => state.categories);
   const updateBook = useLibraryStore(state => state.updateBook);
   const deleteBook = useLibraryStore(state => state.deleteBook);
   const addAuthor = useLibraryStore(state => state.addAuthor);
+  const addCategory = useLibraryStore(state => state.addCategory);
   const readingLogs = useLibraryStore(state => state.readingLogs || []);
   const addReadingLog = useLibraryStore(state => state.addReadingLog);
   const deleteReadingLog = useLibraryStore(state => state.deleteReadingLog);
@@ -57,6 +59,9 @@ export function BookDetailPage() {
   const [editCoverUrl, setEditCoverUrl] = useState("");
   const [editTotalPages, setEditTotalPages] = useState("");
   const [editIsEstimatedPages, setEditIsEstimatedPages] = useState(false);
+  const [editCategoryId, setEditCategoryId] = useState("");
+  const [isCreatingEditCategory, setIsCreatingEditCategory] = useState(false);
+  const [newEditCategoryName, setNewEditCategoryName] = useState("");
   
   const [isProgressOpen, setIsProgressOpen] = useState(false);
   const [updateProgress, setUpdateProgress] = useState("");
@@ -90,6 +95,7 @@ export function BookDetailPage() {
   }
 
   const author = authors.find(a => a.id === book.authorId);
+  const category = categories.find(c => c.id === book.categoryId);
   const progressPct = book.totalPages && book.totalPages > 0 ? Math.min(100, Math.round((book.progress / book.totalPages) * 100)) : 0;
   
   const bookNotes = notes.filter(n => n.sourceId === book.id);
@@ -157,6 +163,8 @@ export function BookDetailPage() {
         console.warn('Auto-link error:', err);
       }
 
+      useNotesStore.getState().indexNote(noteId);
+
       setQuickNoteTitle("");
       setQuickNoteContent("");
       setIsQuickAdding(false);
@@ -179,11 +187,20 @@ export function BookDetailPage() {
         authorId = null;
       }
 
+      let resolvedCategoryId: string | null = editCategoryId || null;
+      if (isCreatingEditCategory && newEditCategoryName.trim()) {
+        const existingCat = categories.find(
+          (c) => c.name.toLowerCase() === newEditCategoryName.trim().toLowerCase()
+        );
+        resolvedCategoryId = existingCat ? existingCat.id : addCategory(newEditCategoryName.trim());
+      }
+
       const parsedPages = editTotalPages ? parseInt(editTotalPages, 10) : NaN;
 
       updateBook(book.id, { 
         title: editTitle.trim(),
         authorId,
+        categoryId: resolvedCategoryId,
         isbn: editIsbn.trim() || undefined,
         coverImage: editCoverUrl.trim() || undefined,
         totalPages: !isNaN(parsedPages) && parsedPages > 0 ? parsedPages : undefined,
@@ -201,6 +218,9 @@ export function BookDetailPage() {
       setEditCoverUrl(book.coverImage || "");
       setEditTotalPages(book.totalPages ? book.totalPages.toString() : "");
       setEditIsEstimatedPages(Boolean(book.isEstimatedPages));
+      setEditCategoryId(book.categoryId || "");
+      setIsCreatingEditCategory(false);
+      setNewEditCategoryName("");
       setIsEditing(true);
     }
   };
@@ -397,6 +417,7 @@ export function BookDetailPage() {
                items={[
                  `${book.progress} hal dibaca`,
                  `${book.totalPages || '?'} total hal`,
+                 category ? category.name : false,
                  book.isbn ? `ISBN ${book.isbn}` : false,
                  book.isEstimatedPages ? 'perkiraan' : false,
                ]}
@@ -643,8 +664,50 @@ export function BookDetailPage() {
               onCoverUrlChange={setEditCoverUrl}
               isEstimatedPages={editIsEstimatedPages}
               onIsEstimatedPagesChange={setEditIsEstimatedPages}
+              existingAuthorNames={authors.map((a) => a.name)}
               resetTrigger={isEditing ? book.id : "closed"}
             />
+
+            <div className="space-y-1.5 pt-3 border-t border-gray-100">
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="edit-book-category" className="text-sm font-medium text-gray-700">
+                  Kategori <span className="text-xs font-normal text-gray-400">(Opsional)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingEditCategory((prev) => !prev)}
+                  className="text-xs font-medium text-gray-600 hover:text-gray-900 min-h-[36px] px-1 cursor-pointer"
+                >
+                  {isCreatingEditCategory ? "Pilih dari daftar" : "+ Kategori baru"}
+                </button>
+              </div>
+
+              {isCreatingEditCategory ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newEditCategoryName}
+                    onChange={(e) => setNewEditCategoryName(e.target.value)}
+                    placeholder="Nama kategori baru..."
+                    className="flex h-11 flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent"
+                  />
+                </div>
+              ) : (
+                <select
+                  id="edit-book-category"
+                  value={editCategoryId}
+                  onChange={(e) => setEditCategoryId(e.target.value)}
+                  className="flex h-11 w-full rounded-xl border border-gray-200 bg-white px-3 py-1 text-sm text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:border-transparent"
+                >
+                  <option value="">Tanpa Kategori</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
           </DialogContent>
           <DialogFooter className="pt-4 border-t border-gray-100">
             <Button type="button" variant="ghost" onClick={() => setIsEditing(false)} className="w-full sm:w-auto mb-2 sm:mb-0">

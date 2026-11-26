@@ -35,6 +35,7 @@ export function NoteDetailPage() {
   const addRelation = useKnowledgeStore(state => state.addRelation);
   const deleteRelation = useKnowledgeStore(state => state.deleteRelation);
   const addSourceFragment = useKnowledgeStore(state => state.addSourceFragment);
+  const updateSourceFragment = useKnowledgeStore(state => state.updateSourceFragment);
   
   const decks = useReviewStore(state => state.decks);
   const addFlashcard = useReviewStore(state => state.addFlashcard);
@@ -746,7 +747,18 @@ export function NoteDetailPage() {
                       <p className="text-sm italic text-gray-700 font-serif line-clamp-2">"{lf.fragment.quote}"</p>
                       <div className="flex flex-wrap items-center gap-2 mt-1.5">
                         <span className="text-xs text-gray-500">{lf.fragment.location}</span>
-                        <ReliabilityBadge score={lf.fragment.reliabilityScore} />
+                        <select
+                          aria-label={`Tingkat keandalan fragmen ${lf.fragment.location}`}
+                          value={lf.fragment.reliabilityScore}
+                          onChange={(e) => updateSourceFragment(lf.fragment.id, { reliabilityScore: parseFloat(e.target.value) })}
+                          className="h-8 sm:h-7 px-2 rounded-lg border border-gray-200 bg-gray-50 text-[11px] font-mono text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-900 cursor-pointer"
+                        >
+                          {RELIABILITY_LEVELS.map((lvl) => (
+                            <option key={lvl.score} value={lvl.score}>
+                              {lvl.shortLabel} ({lvl.score.toFixed(1)})
+                            </option>
+                          ))}
+                        </select>
                         <ProvenanceBadge relation={lf.relation} />
                       </div>
                     </div>

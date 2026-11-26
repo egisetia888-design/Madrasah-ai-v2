@@ -43,6 +43,8 @@ export interface Book extends SyncMetadata {
   createdAt: number;
 }
 
+export type EditionLanguagePreference = 'all' | 'id' | 'original';
+
 export interface BookCandidate {
   id: string;
   title: string;
@@ -52,7 +54,8 @@ export interface BookCandidate {
   coverUrl: string;
   publisher?: string;
   publishedYear?: string;
-  source: 'Open Library' | 'Google Books' | 'Penelusuran AI';
+  language?: string;
+  source: 'Open Library' | 'Digital Archive' | 'Google Books';
   isEstimated: boolean;
   matchScore?: number;
 }
@@ -196,11 +199,12 @@ export interface Relation extends SyncMetadata {
   createdBy: RelationCreator;
   explanation?: string;
   verifiedBySystem: boolean;
+  verifiedAt?: number;
   createdAt: number;
 }
 ```
 
-*Catatan status per Agustus 2026: `confidenceScore` dan `verifiedBySystem` ada di skema sejak awal, tetapi `src/utils/autoLinker.ts` saat ini masih memberi nilai `confidenceScore: 0.95` dan `verifiedBySystem: true` secara hardcode untuk setiap relasi `createdBy: 'ai_agent'` — nilai ini tidak mencerminkan keyakinan aktual model. Perbaikan ini adalah FR1 di `docs/10_tadib_layer_prd.md`, disetujui tapi belum dieksekusi di kode.*
+*Catatan status: Relasi buatan `ai_agent` di `src/utils/autoLinker.ts` dan `src/hooks/useKnowledgeGraph.ts` selalu menggunakan `confidenceScore` aktual dan `verifiedBySystem: false` sampai pengguna mengetuk konfirmasi di `ProvenanceBadge` (yang mencatat `verifiedAt`). Audit Ta'dib di Pengaturan hanya menormalkan relasi AI tanpa `verifiedAt`.*
 
 ### 6. Entitas Spaced Repetition (Review)
 ```typescript
@@ -242,7 +246,7 @@ Server backend (`server.ts`) mengekspos 7 endpoint fungsional khusus untuk mempr
 | `/api/ai/grade-flashcard` | `POST` | `{ question: string, correctAnswer: string, userAnswer: string }` | `{ isCorrect: boolean, quality: number, feedback: string }` | Menilai keselarasan konseptual jawaban pengguna dibandingkan kunci jawaban asli berdasarkan skala kualitas SuperMemo-2 (skala 0-5). |
 | `/api/ai/generate-syllabus` | `POST` | `{ topic: string }` | `{ title: string, description: string, phases: [{ title, description, order, competencies: [...] }] }` | Merancang kurikulum modular baru lengkap dengan Fase Belajar dan Kompetensi dari topik masukan pengguna. |
 | `/api/ai/summarize-literature` | `POST` | `{ content: string }` | `{ mainProblem: string, methodology: string, conclusion: string }` | Memindai dokumen akademik panjang untuk menyaring tiga intisari utama: Masalah Utama, Metodologi, dan Kesimpulan Akhir. |
-| `/api/ai/book-info` | `POST` | `{ title?: string, author?: string, isbn?: string, forceRefresh?: boolean }` | `{ candidates: BookCandidate[], totalPages: number, coverUrl: string, isEstimated: boolean, title?: string, author?: string, isbn?: string }` | Mengambil hingga 5 kandidat edisi buku secara paralel dari Open Library (parameter terstruktur `isbn`/`title`/`author`) dan Google Books (`isbn:`/`intitle:`/`+inauthor:`) dengan penyaringan ketat terhadap buku turunan serta validasi penulis, lalu beralih ke Google Search Grounding AI (`gemini-4-hydrogen`) jika data katalog belum lengkap. |
+| `/api/ai/book-info` | `POST` | `{ title?: string, author?: string, isbn?: string, languagePref?: 'all' \| 'id' \| 'original', forceRefresh?: boolean }` | `{ candidates: BookCandidate[], totalPages: number, coverUrl: string, isEstimated: boolean, title?: string, author?: string, isbn?: string }` | Resolusi metadata faktual tingkat edisi secara paralel dari **Open Library** (`/isbn/{isbn}.json`, `/works/{id}/editions.json`, dan pengayaan `ocaid`) serta **Digital Archive Entries** (`archive.org/advancedsearch.php` `mediatype:texts`) dengan verifikasi `HEAD` URL sampul serta filter ketat anti-tiruan, anti-artikel jurnal, dan validasi penulis (berjalan paralel dengan Google Books dari browser klien, 0 token AI). |
 
 ---
 
@@ -254,10 +258,10 @@ Untuk melindungi infrastruktur server serta menghemat biaya konsumsi API pihak k
 Server backend berkomunikasi langsung dengan **Google Gemini API** melalui SDK resmi `@google/genai` (`User-Agent: 'aistudio-build'`) menggunakan pemetaan model hybrid berbasis beban dan efisiensi kuota:
 1. **Jalur Ringan & Kuantitas Tinggi — `gemini-3.1-flash-lite` (`ThinkingLevel.MINIMAL`)**:
    - Tanpa konsumsi *thinking tokens*, latensi terendah, dan kapasitas kuota harian maksimal.
-   - Digunakan oleh: `/api/ai/suggest-tags`, `/api/ai/grade-flashcard`, `/api/ai/book-info` (hanya saat data Open Library & Google Books tidak lengkap), dan `/api/ai/summarize-literature`.
+   - Digunakan oleh: `/api/ai/suggest-tags`, `/api/ai/grade-flashcard`, `/api/ai/summarize-literature`, dan cadangan otomatis saat model sintesis sibuk.
 2. **Jalur Sintesis & Struktur Kompleks — `gemini-4-hydrogen` (`ThinkingLevel.LOW`)**:
    - Penalaran terukur dengan anggaran *thinking* minimum agar kualitas sintesis dan skema JSON tetap tajam namun tetap irit token.
-   - Digunakan oleh: `/api/ai/zettelkasten`, `/api/ai/generate-flashcards`, `/api/ai/generate-syllabus`, dan fallback Google Search Grounding pada `/api/ai/book-info`.
+   - Digunakan oleh: `/api/ai/zettelkasten`, `/api/ai/generate-flashcards`, dan `/api/ai/generate-syllabus`.
 3. **Ketahanan & Pengaman Kesalahan**:
    - *Exponential backoff* otomatis untuk lonjakan sementara `503`/`UNAVAILABLE`, `abortSignal` batas waktu per model (~20s saat tersedia model cadangan) untuk failover lintas model cepat ke `gemini-3.1-flash-lite` pada `429`/`404`/timeout, serta pesan diagnostik jelas menuju **Settings > Secrets** bila `GEMINI_API_KEY` belum terpasang atau tidak valid.
 
@@ -269,7 +273,7 @@ Setiap endpoint menerapkan pemangkasan input di klien (`prepareSuggestTagsPayloa
 - **/api/ai/grade-flashcard**: `gemini-3.1-flash-lite` (`ThinkingLevel.MINIMAL`), evaluasi semantik skala SM-2 (0–5) dengan feedback 1–2 kalimat (Timeout 45s).
 - **/api/ai/generate-syllabus**: `gemini-4-hydrogen` (`ThinkingLevel.LOW`) dengan failover otomatis ke `gemini-3.1-flash-lite`, topik ≤300 karakter, menghasilkan 3 fase × 3–4 kompetensi ringkas (Timeout 45s).
 - **/api/ai/summarize-literature**: `gemini-3.1-flash-lite` (`ThinkingLevel.MINIMAL`), konten *head+tail* ≤4.500 karakter, menghasilkan 3 pilar telaah (Timeout 45s).
-- **/api/ai/book-info**: Pencarian paralel Open Library + Google Books (0 token AI) berbasis ISBN/judul/penulis dengan penyaringan ketat per edisi → `gemini-4-hydrogen` (`ThinkingLevel.LOW`, alat `googleSearch`) hanya bila kandidat kuat atau jumlah halaman masih kosong.
+- **/api/ai/book-info**: Pencarian paralel Google Books langsung di browser klien (`src/lib/bookCatalog.ts`) + resolusi edisi spesifik Open Library & Digital Archive Entries (`archive.org`) di server dengan pengayaan `ocaid`, penyaringan anti-tiruan/anti-artikel, preferensi bahasa edisi, dan verifikasi `HEAD` URL sampul (0 token AI).
 
 ### 3. Pembatasan Frekuensi (Rate Limiting)
 - **API Limiter Umum** (`/api/*`): Membatasi setiap alamat IP pengguna maksimal 100 panggilan dalam jendela waktu 15 menit.

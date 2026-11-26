@@ -23,6 +23,7 @@ export function ContextualSidebar({ title, content, currentDraftId, onInsertWiki
   const [semanticSuggestions, setSemanticSuggestions] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const isModelLoading = useSemanticSearchStore(state => state.isModelLoading);
+  const modelError = useSemanticSearchStore(state => state.modelError);
 
   // Live entity detection from draft text
   const detectedEntities = useMemo(() => {
@@ -145,6 +146,12 @@ export function ContextualSidebar({ title, content, currentDraftId, onInsertWiki
           </div>
         )}
 
+        {!isModelLoading && modelError && (
+          <div className="p-3 text-[11px] text-gray-500 border border-gray-200 bg-gray-50 rounded-xl leading-relaxed">
+            {modelError}
+          </div>
+        )}
+
         {isSearching && !isModelLoading && semanticSuggestions.length === 0 && (
           <div className="space-y-2.5">
             {[1, 2, 3].map(i => (
@@ -153,7 +160,7 @@ export function ContextualSidebar({ title, content, currentDraftId, onInsertWiki
           </div>
         )}
 
-        {semanticSuggestions.length === 0 && !isSearching && !isModelLoading && detectedEntities.length === 0 && (
+        {semanticSuggestions.length === 0 && !isSearching && !isModelLoading && !modelError && detectedEntities.length === 0 && (
           <div className="p-5 text-center text-xs text-gray-400 border border-dashed border-gray-200 rounded-xl">
             Tuliskan lebih banyak konten untuk melihat saran relasi dan catatan terkait secara otomatis.
           </div>

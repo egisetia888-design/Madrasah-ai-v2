@@ -25,6 +25,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[]>([]);
   const [isSearchingSemantic, setIsSearchingSemantic] = useState(false);
   const isModelLoading = useSemanticSearchStore(state => state.isModelLoading);
+  const modelError = useSemanticSearchStore(state => state.modelError);
 
   useEffect(() => {
     const performSemanticSearch = async () => {
@@ -179,6 +180,12 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
           <div className="bg-gray-50 border-b border-gray-100 px-4 py-2 flex items-center gap-2">
             <Loader2 className="w-3.5 h-3.5 text-gray-500 animate-spin" />
             <span className="text-xs font-medium text-gray-600">Menyiapkan pencarian semantik...</span>
+          </div>
+        )}
+
+        {!isModelLoading && modelError && query.trim().length >= 3 && (
+          <div className="bg-gray-50 border-b border-gray-100 px-4 py-2 text-[11px] font-mono text-gray-500">
+            Pencarian makna lokal tidak aktif — menampilkan pencocokan kata kunci.
           </div>
         )}
 

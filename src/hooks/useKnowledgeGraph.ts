@@ -73,7 +73,7 @@ export function useKnowledgeGraph() {
         if (!linkText) return;
         
         // Find existing node by label (case-insensitive)
-        const existingNode = nodes.find(n => n.label.toLowerCase() === linkText.toLowerCase());
+        const existingNode = nodes.find(n => (n.label || '').toLowerCase() === linkText.toLowerCase());
         const targetId = existingNode ? existingNode.id : `wikilink-${linkText.toLowerCase().replace(/\s+/g, '-')}`;
         
         addNodeIfMissing(targetId, linkText, existingNode ? existingNode.type : 'concept');
@@ -82,15 +82,16 @@ export function useKnowledgeGraph() {
     };
 
     // 1. Add all primary entities
-    notes.forEach(note => addNodeIfMissing(note.id, note.title, 'note'));
-    drafts.forEach(draft => addNodeIfMissing(draft.id, draft.title, 'writing'));
-    projects.forEach(project => addNodeIfMissing(project.id, project.title, 'project'));
-    books.forEach(book => addNodeIfMissing(book.id, book.title, 'book'));
-    authors.forEach(author => addNodeIfMissing(author.id, author.name, 'author'));
-    concepts.forEach(concept => addNodeIfMissing(concept.id, concept.name, 'concept'));
+    notes.forEach(note => addNodeIfMissing(note.id, note.title || 'Catatan', 'note'));
+    drafts.forEach(draft => addNodeIfMissing(draft.id, draft.title || 'Draf', 'writing'));
+    projects.forEach(project => addNodeIfMissing(project.id, project.title || 'Proyek', 'project'));
+    books.forEach(book => addNodeIfMissing(book.id, book.title || 'Buku', 'book'));
+    authors.forEach(author => addNodeIfMissing(author.id, author.name || 'Penulis', 'author'));
+    concepts.forEach(concept => addNodeIfMissing(concept.id, concept.name || 'Konsep', 'concept'));
     
     fragments.forEach(fragment => {
-      const shortQuote = fragment.quote.length > 30 ? fragment.quote.substring(0, 30) + '...' : fragment.quote;
+      const q = fragment.quote || '';
+      const shortQuote = q.length > 30 ? q.substring(0, 30) + '...' : q;
       addNodeIfMissing(fragment.id, `Frg: ${shortQuote}`, 'source_fragment');
     });
 
@@ -109,10 +110,10 @@ export function useKnowledgeGraph() {
         addEdgeIfMissing(note.id, note.sourceId, 'source');
       }
 
-      // Automatic entity scanning
+      // Automatic entity scanning (machine-suggested, unverified until explicit confirmation)
       const autoEntities = scanTextForEntities(`${note.title}\n${note.content}`, note.id);
       autoEntities.forEach(ent => {
-        addEdgeIfMissing(note.id, ent.id, ent.relationType);
+        addEdgeIfMissing(note.id, ent.id, ent.relationType, false, ent.confidence, 'ai_agent');
       });
     });
     
@@ -123,7 +124,7 @@ export function useKnowledgeGraph() {
 
       const autoEntities = scanTextForEntities(`${draft.title}\n${draft.content}`, draft.id);
       autoEntities.forEach(ent => {
-        addEdgeIfMissing(draft.id, ent.id, ent.relationType);
+        addEdgeIfMissing(draft.id, ent.id, ent.relationType, false, ent.confidence, 'ai_agent');
       });
     });
     
@@ -134,7 +135,7 @@ export function useKnowledgeGraph() {
 
       const autoEntities = scanTextForEntities(`${project.title}\n${project.description}`, project.id);
       autoEntities.forEach(ent => {
-        addEdgeIfMissing(project.id, ent.id, ent.relationType);
+        addEdgeIfMissing(project.id, ent.id, ent.relationType, false, ent.confidence, 'ai_agent');
       });
     });
 
@@ -150,14 +151,14 @@ export function useKnowledgeGraph() {
       }
       const autoEntities = scanTextForEntities(fragment.quote, fragment.id);
       autoEntities.forEach(ent => {
-        addEdgeIfMissing(fragment.id, ent.id, ent.relationType);
+        addEdgeIfMissing(fragment.id, ent.id, ent.relationType, false, ent.confidence, 'ai_agent');
       });
     });
 
     concepts.forEach(concept => {
       const autoEntities = scanTextForEntities(`${concept.name}\n${concept.definition}\n${concept.aliases.join(' ')}`, concept.id);
       autoEntities.forEach(ent => {
-        addEdgeIfMissing(concept.id, ent.id, ent.relationType);
+        addEdgeIfMissing(concept.id, ent.id, ent.relationType, false, ent.confidence, 'ai_agent');
       });
     });
 
@@ -169,7 +170,7 @@ export function useKnowledgeGraph() {
       }
       const autoEntities = scanTextForEntities(comp.title, comp.id);
       autoEntities.forEach(ent => {
-        addEdgeIfMissing(comp.id, ent.id, ent.relationType);
+        addEdgeIfMissing(comp.id, ent.id, ent.relationType, false, ent.confidence, 'ai_agent');
       });
     });
 

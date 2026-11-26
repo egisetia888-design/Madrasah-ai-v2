@@ -47,6 +47,8 @@ export interface ReadingLog extends SyncMetadata {
   createdAt: number;
 }
 
+export type EditionLanguagePreference = 'all' | 'id' | 'original';
+
 export interface BookCandidate {
   id: string;
   title: string;
@@ -56,7 +58,8 @@ export interface BookCandidate {
   coverUrl: string;
   publisher?: string;
   publishedYear?: string;
-  source: 'Open Library' | 'Google Books' | 'Penelusuran AI';
+  language?: string;
+  source: 'Open Library' | 'Digital Archive' | 'Google Books';
   isEstimated: boolean;
   matchScore?: number;
 }
@@ -205,6 +208,7 @@ export interface Edge {
   verifiedBySystem?: boolean;
   confidenceScore?: number;
   createdBy?: RelationCreator;
+  verifiedAt?: number;
 }
 
 export type RelationType = 'supports' | 'contradicts' | 'expands_on' | 'defines' | 'is_a' | 'part_of' | 'references' | 'applies';
@@ -219,6 +223,7 @@ export interface Relation extends SyncMetadata {
   createdBy: RelationCreator;
   explanation?: string;
   verifiedBySystem: boolean;
+  verifiedAt?: number;
   createdAt: number;
 }
 

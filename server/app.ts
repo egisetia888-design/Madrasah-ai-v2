@@ -1,10 +1,30 @@
 import express from "express";
 import crypto from "crypto";
+import net from "net";
 import dotenv from "dotenv";
 import rateLimit from "express-rate-limit";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
+import type { BookCandidate, EditionLanguagePreference } from "../src/types";
+import {
+  MIN_AUTHOR_SCORE,
+  MIN_TITLE_SCORE,
+  buildArchiveSearchQuery,
+  computeAuthorMatchScore,
+  computeLanguageBonus,
+  computeTitleMatchScore,
+  deduplicateAndRankCandidates,
+  isRejectedArchiveEntry,
+  normalizeIsbn,
+  normalizeLanguageCode,
+  pickPreferredIsbn,
+} from "../src/utils/bookMetadata";
 
 dotenv.config();
+
+// Disable Node Happy Eyeballs (250ms default attempt timeout stalls/drops connections to distant US hosts like Open Library)
+if (typeof net.setDefaultAutoSelectFamily === "function") {
+  net.setDefaultAutoSelectFamily(false);
+}
 
 // Process-level safety net for unhandled promise rejections
 process.on('unhandledRejection', (reason: any) => {
@@ -1065,146 +1085,22 @@ Aturan:
     }
   });
 
-interface BookCandidate {
-  id: string;
-  title: string;
-  author?: string;
-  isbn?: string;
-  totalPages: number;
-  coverUrl: string;
-  publisher?: string;
-  publishedYear?: string;
-  source: "Open Library" | "Google Books" | "Penelusuran AI";
-  isEstimated: boolean;
-  matchScore: number;
+const OPEN_LIBRARY_HEADERS = {
+  Accept: "application/json",
+  "User-Agent": "MadrasahPKOS/1.0 (https://madrasah.remix)",
+};
+
+interface OpenLibrarySearchResult {
+  docs: any[];
+  timedOut: boolean;
 }
 
-function normalizeIsbn(raw: unknown): string {
-  return String(raw || "")
-    .replace(/[^0-9Xx]/g, "")
-    .toUpperCase()
-    .slice(0, 13);
-}
-
-function normalizeForMatch(s: string): string {
-  return String(s || "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-const DERIVATIVE_BOOK_TERMS = [
-  "summary",
-  "workbook",
-  "study guide",
-  "key takeaways",
-  "companion",
-  "analysis of",
-  "ringkasan",
-  "intisari",
-  "for teens",
-  "for kids",
-  "coloring book",
-  "trivia",
-];
-
-function computeTitleMatchScore(queryTitle: string, candidateTitle: string): number {
-  const q = normalizeForMatch(queryTitle);
-  const c = normalizeForMatch(candidateTitle);
-  if (!q || !c) return 0;
-  if (q === c) return 1;
-
-  // Subtitle match e.g. "Atomic Habits" vs "Atomic Habits: An Easy & Proven Way..."
-  const rawC = String(candidateTitle || "").toLowerCase().trim();
-  if (rawC.startsWith(`${q}:`) || rawC.startsWith(`${q} -`) || rawC.startsWith(`${q} (`)) {
-    return 0.92;
-  }
-
-  const qWords = q.split(" ").filter((w) => w.length > 1);
-  const cWords = c.split(" ").filter((w) => w.length > 1);
-  if (qWords.length === 0 || cWords.length === 0) {
-    return c.includes(q) ? 0.7 : 0;
-  }
-
-  const qSet = new Set(qWords);
-  const cSet = new Set(cWords);
-  let overlap = 0;
-  for (const w of qSet) {
-    if (cSet.has(w)) overlap++;
-  }
-
-  const queryCoverage = overlap / qSet.size;
-  const jaccard = overlap / (qSet.size + cSet.size - overlap);
-  let score = queryCoverage * 0.6 + jaccard * 0.4;
-
-  // Penalize derivative/abridged books unless the user explicitly searched for those terms
-  const hasDerivativePenalty = DERIVATIVE_BOOK_TERMS.some(
-    (term) => c.includes(term) && !q.includes(term)
-  );
-  if (hasDerivativePenalty) {
-    score -= 0.55;
-  }
-
-  return Math.max(0, Math.min(0.99, score));
-}
-
-function computeAuthorMatchScore(queryAuthor: string, candidateAuthors: string[]): number {
-  const q = normalizeForMatch(queryAuthor);
-  if (!q) return 0;
-  if (!candidateAuthors || candidateAuthors.length === 0) return -0.15;
-
-  const qWords = q.split(" ").filter((w) => w.length > 1);
-  let best = 0;
-
-  for (const rawCandidate of candidateAuthors) {
-    const c = normalizeForMatch(rawCandidate);
-    if (!c) continue;
-    if (c === q) return 1;
-    if (c.includes(q) || q.includes(c)) {
-      best = Math.max(best, 0.9);
-      continue;
-    }
-    const cSet = new Set(c.split(" ").filter((w) => w.length > 1));
-    if (qWords.length > 0 && cSet.size > 0) {
-      let overlap = 0;
-      for (const w of qWords) {
-        if (cSet.has(w)) overlap++;
-      }
-      best = Math.max(best, overlap / qWords.length);
-    }
-  }
-
-  return best;
-}
-
-function pickPreferredIsbn(isbns: unknown[], queryIsbn: string): string {
-  if (!Array.isArray(isbns)) return "";
-  const cleaned = isbns
-    .map((x) => normalizeIsbn(x))
-    .filter((x) => x.length === 10 || x.length === 13);
-  if (cleaned.length === 0) return "";
-  if (queryIsbn && cleaned.includes(queryIsbn)) return queryIsbn;
-  return cleaned.find((x) => x.length === 13) || cleaned[0] || "";
-}
-
-function sanitizeCoverUrl(rawUrl: unknown): string {
-  if (typeof rawUrl !== "string") return "";
-  let url = rawUrl.trim();
-  if (!url) return "";
-  if (url.startsWith("http://")) {
-    url = "https://" + url.slice(7);
-  }
-  if (!url.startsWith("https://")) return "";
-  url = url.replace("&edge=curl", "");
-  return url;
-}
-
-async function fetchOpenLibrarySearch(params: URLSearchParams, timeoutMs = 6500): Promise<any[]> {
-  params.set("fields", "key,title,author_name,cover_i,isbn,number_of_pages_median,number_of_pages,publisher,first_publish_year");
-  params.set("limit", "12");
+async function fetchOpenLibrarySearch(
+  params: URLSearchParams,
+  timeoutMs = 11000
+): Promise<OpenLibrarySearchResult> {
+  params.set("fields", "key,title,author_name,cover_i,language,first_publish_year");
+  params.set("limit", "10");
   const queryUrl = `https://openlibrary.org/search.json?${params.toString()}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -1212,458 +1108,522 @@ async function fetchOpenLibrarySearch(params: URLSearchParams, timeoutMs = 6500)
   try {
     const res = await fetch(queryUrl, {
       signal: controller.signal,
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "MadrasahPKOS/1.0 (https://madrasah.remix)"
-      }
+      headers: OPEN_LIBRARY_HEADERS,
     });
-    clearTimeout(timeoutId);
-    if (!res.ok) return [];
-    const data = await res.json() as any;
-    return Array.isArray(data?.docs) ? data.docs : [];
+    if (!res.ok) return { docs: [], timedOut: false };
+    const data = (await res.json()) as any;
+    return {
+      docs: Array.isArray(data?.docs) ? data.docs : [],
+      timedOut: false,
+    };
   } catch (err: any) {
+    const isAbort = err?.name === "AbortError" || controller.signal.aborted;
+    if (isAbort) {
+      console.info(`[OpenLibrary] Search timed out after ${timeoutMs}ms.`);
+    } else {
+      console.info(`[OpenLibrary] Search unavailable:`, err?.message || err);
+    }
+    return { docs: [], timedOut: isAbort };
+  } finally {
     clearTimeout(timeoutId);
-    console.warn(`[OpenLibrary] Search failed:`, err?.message || err);
-    return [];
   }
 }
 
-async function fetchOpenLibraryJson(urlPath: string, timeoutMs = 4500): Promise<any | null> {
+async function fetchOpenLibraryJson(urlPath: string, timeoutMs = 8000): Promise<any | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`https://openlibrary.org${urlPath}`, {
       signal: controller.signal,
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "MadrasahPKOS/1.0 (https://madrasah.remix)"
-      }
+      headers: OPEN_LIBRARY_HEADERS,
     });
-    clearTimeout(timeoutId);
     if (!res.ok) return null;
     return await res.json();
   } catch {
-    clearTimeout(timeoutId);
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
-async function enrichOpenLibraryCandidate(
-  candidate: BookCandidate,
-  workKey: string,
-  queryIsbn: string
-): Promise<BookCandidate> {
-  if (candidate.totalPages > 0 && candidate.coverUrl) return candidate;
-
-  // Try direct ISBN edition first if available
-  const lookupIsbn = queryIsbn || candidate.isbn;
-  if (lookupIsbn) {
-    const ed = await fetchOpenLibraryJson(`/isbn/${encodeURIComponent(lookupIsbn)}.json`);
-    if (ed) {
-      const pages = typeof ed.number_of_pages === "number" && ed.number_of_pages > 0
-        ? Math.round(ed.number_of_pages)
-        : candidate.totalPages;
-      const coverId = Array.isArray(ed.covers) ? ed.covers.find((c: any) => typeof c === "number" && c > 0) : null;
-      const coverUrl = candidate.coverUrl || (coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg?default=false` : "");
-      return {
-        ...candidate,
-        totalPages: pages,
-        coverUrl,
-        publisher: candidate.publisher || (Array.isArray(ed.publishers) && ed.publishers[0] ? String(ed.publishers[0]) : undefined),
-        publishedYear: candidate.publishedYear || (String(ed.publish_date || "").match(/\d{4}/)?.[0] || undefined),
-      };
-    }
-  }
-
-  // Try work editions list to recover page count & cover
-  if (workKey && workKey.startsWith("/works/")) {
-    const edList = await fetchOpenLibraryJson(`${workKey}/editions.json?limit=6`);
-    const entries: any[] = Array.isArray(edList?.entries) ? edList.entries : [];
-    for (const entry of entries) {
-      const pages = typeof entry?.number_of_pages === "number" && entry.number_of_pages > 0
-        ? Math.round(entry.number_of_pages)
-        : 0;
-      const coverId = Array.isArray(entry?.covers) ? entry.covers.find((c: any) => typeof c === "number" && c > 0) : null;
-      const entryIsbn = pickPreferredIsbn([...(entry?.isbn_13 || []), ...(entry?.isbn_10 || [])], queryIsbn);
-      if (pages > 0 || coverId) {
-        return {
-          ...candidate,
-          totalPages: candidate.totalPages || pages,
-          coverUrl: candidate.coverUrl || (coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg?default=false` : ""),
-          isbn: candidate.isbn || (entryIsbn || undefined),
-          publisher: candidate.publisher || (Array.isArray(entry?.publishers) && entry.publishers[0] ? String(entry.publishers[0]) : undefined),
-          publishedYear: candidate.publishedYear || (String(entry?.publish_date || "").match(/\d{4}/)?.[0] || undefined),
-        };
-      }
-    }
-  }
-
-  return candidate;
+function extractEditionLanguage(entry: any): string | undefined {
+  if (!Array.isArray(entry?.languages) || entry.languages.length === 0) return undefined;
+  const first = entry.languages[0];
+  const raw = typeof first === "string" ? first : first?.key;
+  return normalizeLanguageCode(raw);
 }
 
-async function fetchCandidatesFromOpenLibrary(
+function buildOpenLibraryEditionCandidate(
+  entry: any,
+  fallbackAuthors: string[],
+  queryTitle: string,
+  queryAuthor: string,
+  queryIsbn: string,
+  languagePref: EditionLanguagePreference,
+  exactIsbnMatch = false
+): BookCandidate | null {
+  const editionTitle = String(entry?.title || "").trim();
+  if (!editionTitle) return null;
+
+  const titleScore = queryTitle ? computeTitleMatchScore(queryTitle, editionTitle) : 1;
+  const authorScore = queryAuthor ? computeAuthorMatchScore(queryAuthor, fallbackAuthors) : 0;
+
+  if (!exactIsbnMatch) {
+    if (queryTitle && titleScore < MIN_TITLE_SCORE) return null;
+    if (queryAuthor && authorScore < MIN_AUTHOR_SCORE) return null;
+  }
+
+  const editionIsbn = pickPreferredIsbn(
+    [...(entry?.isbn_13 || []), ...(entry?.isbn_10 || [])],
+    queryIsbn
+  );
+  const ocaid = typeof entry?.ocaid === "string" ? entry.ocaid.trim() : "";
+  const totalPages =
+    typeof entry?.number_of_pages === "number" && entry.number_of_pages > 0
+      ? Math.round(entry.number_of_pages)
+      : 0;
+
+  const coverId = Array.isArray(entry?.covers)
+    ? entry.covers.find((c: any) => typeof c === "number" && c > 0)
+    : null;
+  const coverUrl = coverId
+    ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg?default=false`
+    : ocaid
+      ? `https://archive.org/services/img/${encodeURIComponent(ocaid)}`
+      : editionIsbn
+        ? `https://covers.openlibrary.org/b/isbn/${editionIsbn}-L.jpg?default=false`
+        : "";
+
+  // Require at least one factual attribute for this specific edition
+  if (totalPages === 0 && !coverUrl && !editionIsbn) return null;
+
+  const editionLang = extractEditionLanguage(entry);
+  const yearMatch = String(entry?.publish_date || "").match(/\d{4}/);
+  const publisher =
+    Array.isArray(entry?.publishers) && entry.publishers[0]
+      ? String(entry.publishers[0]).trim()
+      : undefined;
+
+  const baseScore =
+    (exactIsbnMatch ? 2.0 : titleScore + authorScore * 0.45) +
+    computeLanguageBonus(editionLang, languagePref);
+
+  return {
+    id: `ol-ed-${entry.key || editionIsbn || ocaid || editionTitle}`,
+    title: editionTitle,
+    author: fallbackAuthors[0] || undefined,
+    isbn: editionIsbn || undefined,
+    totalPages,
+    coverUrl,
+    publisher,
+    publishedYear: yearMatch ? yearMatch[0] : undefined,
+    language: editionLang,
+    source: "Open Library",
+    isEstimated: false,
+    matchScore: baseScore,
+  };
+}
+
+async function resolveIsbnAuthorNames(ed: any, fallbackSearchAuthors: string[]): Promise<string[]> {
+  if (fallbackSearchAuthors.length > 0) return fallbackSearchAuthors;
+  const authorRefs: any[] = Array.isArray(ed?.authors) ? ed.authors.slice(0, 2) : [];
+  if (authorRefs.length === 0) return [];
+
+  const loaded = await Promise.all(
+    authorRefs.map(async (ref) => {
+      const key = typeof ref === "string" ? ref : ref?.key;
+      if (!key || !String(key).startsWith("/authors/")) return "";
+      const authorDoc = await fetchOpenLibraryJson(`${key}.json`, 3500);
+      return authorDoc?.name ? String(authorDoc.name).trim() : "";
+    })
+  );
+  return loaded.filter(Boolean);
+}
+
+async function verifySingleCoverUrl(url: string, timeoutMs = 2500): Promise<boolean> {
+  if (!url) return false;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": OPEN_LIBRARY_HEADERS["User-Agent"],
+      },
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) return false;
+    const contentType = res.headers.get("content-type") || "";
+    if (contentType && !contentType.toLowerCase().startsWith("image/")) {
+      return false;
+    }
+    const contentLength = parseInt(res.headers.get("content-length") || "0", 10);
+    if (contentLength > 0 && contentLength < 100) {
+      return false;
+    }
+    return true;
+  } catch {
+    clearTimeout(timeoutId);
+    return false;
+  }
+}
+
+async function verifyCandidateCovers(candidates: BookCandidate[]): Promise<BookCandidate[]> {
+  const isVerifiableCover = (u: string) =>
+    Boolean(u && (u.includes("covers.openlibrary.org") || u.includes("archive.org/services/img/")));
+
+  const urlsToVerify = Array.from(
+    new Set(candidates.map((c) => c.coverUrl).filter(isVerifiableCover))
+  ).slice(0, 12);
+
+  if (urlsToVerify.length === 0) return candidates;
+
+  const verificationMap = new Map<string, boolean>();
+  await Promise.all(
+    urlsToVerify.map(async (url) => {
+      const ok = await verifySingleCoverUrl(url);
+      verificationMap.set(url, ok);
+    })
+  );
+
+  return candidates.map((c) => {
+    if (!isVerifiableCover(c.coverUrl)) return c;
+    const verified = verificationMap.get(c.coverUrl);
+    if (verified === false) {
+      return { ...c, coverUrl: "" };
+    }
+    return c;
+  });
+}
+
+async function fetchArchiveEntryPageCount(identifier: string, timeoutMs = 4500): Promise<number> {
+  if (!identifier) return 0;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(
+      `https://archive.org/metadata/${encodeURIComponent(identifier)}/metadata`,
+      { signal: controller.signal, headers: OPEN_LIBRARY_HEADERS }
+    );
+    if (!res.ok) return 0;
+    const data = (await res.json()) as any;
+    const rawPages = data?.result?.imagecount ?? data?.result?.pages ?? 0;
+    const parsed = parseInt(String(rawPages), 10);
+    return !isNaN(parsed) && parsed > 0 ? parsed : 0;
+  } catch {
+    return 0;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchDigitalArchiveQuery(
+  luceneQuery: string,
+  timeoutMs = 7500
+): Promise<{ docs: any[]; timedOut: boolean }> {
+  if (!luceneQuery) return { docs: [], timedOut: false };
+  const params = new URLSearchParams({
+    q: luceneQuery,
+    rows: "12",
+    output: "json",
+  });
+  for (const field of [
+    "identifier",
+    "title",
+    "creator",
+    "publisher",
+    "year",
+    "date",
+    "language",
+    "isbn",
+    "imagecount",
+    "collection",
+  ]) {
+    params.append("fl[]", field);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://archive.org/advancedsearch.php?${params.toString()}`, {
+      signal: controller.signal,
+      headers: OPEN_LIBRARY_HEADERS,
+    });
+    if (!res.ok) return { docs: [], timedOut: false };
+    const data = (await res.json()) as any;
+    const docs = Array.isArray(data?.response?.docs) ? data.response.docs : [];
+    return { docs, timedOut: false };
+  } catch (err: any) {
+    const isAbort = err?.name === "AbortError" || controller.signal.aborted;
+    console.info(`[DigitalArchive] Search skipped:`, isAbort ? "timeout" : err?.message || err);
+    return { docs: [], timedOut: isAbort };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchCandidatesFromDigitalArchive(
   title: string,
   author: string,
-  isbn: string
-): Promise<BookCandidate[]> {
-  let docs: any[] = [];
+  isbn: string,
+  languagePref: EditionLanguagePreference
+): Promise<{ candidates: BookCandidate[]; timedOut: boolean }> {
+  const primaryQuery = buildArchiveSearchQuery(title, author, isbn);
+  if (!primaryQuery) return { candidates: [], timedOut: false };
 
-  if (isbn) {
-    const p = new URLSearchParams({ isbn });
-    docs = await fetchOpenLibrarySearch(p);
+  const primaryRes = await fetchDigitalArchiveQuery(primaryQuery);
+  let docs = primaryRes.docs;
+  let timedOut = primaryRes.timedOut;
+
+  // If author + title returned 0 results cleanly, retry title-only and enforce strict author score when creator exists
+  if (docs.length === 0 && !timedOut && author && title && !isbn) {
+    const titleOnlyQuery = buildArchiveSearchQuery(title, "", "");
+    const fallbackRes = await fetchDigitalArchiveQuery(titleOnlyQuery);
+    docs = fallbackRes.docs;
+    timedOut = timedOut || fallbackRes.timedOut;
   }
 
-  if (docs.length === 0 && title) {
-    const p = new URLSearchParams({ title });
-    if (author) p.set("author", author);
-    docs = await fetchOpenLibrarySearch(p);
-  }
+  const candidates: BookCandidate[] = [];
+  for (const doc of docs) {
+    const identifier = String(doc?.identifier || "").trim();
+    const docTitle = String(doc?.title || "").trim();
+    if (!identifier || !docTitle) continue;
+    if (isRejectedArchiveEntry(identifier, docTitle, title)) continue;
 
-  if (docs.length === 0 && title) {
-    const q = author ? `${title} ${author}` : title;
-    const p = new URLSearchParams({ q });
-    docs = await fetchOpenLibrarySearch(p);
-  }
+    const rawCreators = Array.isArray(doc.creator)
+      ? doc.creator
+      : doc.creator
+        ? [doc.creator]
+        : [];
+    const creatorList: string[] = rawCreators.map((c: any) => String(c || "").trim()).filter(Boolean);
 
-  const matched: Array<{ candidate: BookCandidate; workKey: string }> = [];
-  for (let i = 0; i < docs.length; i++) {
-    const doc = docs[i];
-    if (!doc?.title) continue;
-
-    const docIsbns = Array.isArray(doc.isbn) ? doc.isbn : [];
+    const docIsbns = Array.isArray(doc.isbn) ? doc.isbn : doc.isbn ? [doc.isbn] : [];
     const preferredIsbn = pickPreferredIsbn(docIsbns, isbn);
     const exactIsbnHit = Boolean(isbn && docIsbns.some((x: any) => normalizeIsbn(x) === isbn));
 
-    const titleScore = title ? computeTitleMatchScore(title, String(doc.title)) : 1;
-    const candidateAuthors: string[] = Array.isArray(doc.author_name)
-      ? doc.author_name.map((a: any) => String(a || "").trim()).filter(Boolean)
-      : [];
-    const authorScore = author ? computeAuthorMatchScore(author, candidateAuthors) : 0;
+    const titleScore = title ? computeTitleMatchScore(title, docTitle) : 1;
+    const authorScore = author ? computeAuthorMatchScore(author, creatorList) : 0;
 
     if (!exactIsbnHit) {
-      if (title && titleScore < 0.48) continue;
-      if (author && authorScore < 0.35) continue;
+      if (title && titleScore < MIN_TITLE_SCORE) continue;
+      if (author && authorScore < MIN_AUTHOR_SCORE) continue;
     }
 
-    const rawPages = doc.number_of_pages_median ?? doc.number_of_pages ?? 0;
-    const totalPages = typeof rawPages === "number"
-      ? Math.max(0, Math.round(rawPages))
-      : Math.max(0, parseInt(String(rawPages), 10) || 0);
+    const rawImageCount = parseInt(String(doc.imagecount || "0"), 10);
+    const totalPages = !isNaN(rawImageCount) && rawImageCount > 0 ? rawImageCount : 0;
 
-    let coverUrl = "";
-    if (doc.cover_i) {
-      coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg?default=false`;
-    } else if (preferredIsbn) {
-      coverUrl = `https://covers.openlibrary.org/b/isbn/${preferredIsbn}-L.jpg?default=false`;
-    }
+    const rawLang = Array.isArray(doc.language) ? doc.language[0] : doc.language;
+    const editionLang = normalizeLanguageCode(rawLang);
+    const yearMatch = String(doc.year || doc.date || "").match(/\d{4}/);
+    const rawPublisher = Array.isArray(doc.publisher) ? doc.publisher[0] : doc.publisher;
+    const publisher = rawPublisher ? String(rawPublisher).trim() : undefined;
 
-    const completenessBonus = (totalPages > 0 ? 0.14 : 0) + (coverUrl ? 0.12 : 0);
-    const matchScore = (exactIsbnHit ? 2.0 : titleScore + authorScore * 0.45) + completenessBonus;
+    const collections: string[] = Array.isArray(doc.collection)
+      ? doc.collection.map((c: any) => String(c).toLowerCase())
+      : doc.collection
+        ? [String(doc.collection).toLowerCase()]
+        : [];
+    const isCuratedBookCollection = collections.some(
+      (c) =>
+        c === "internetarchivebooks" ||
+        c === "inlibrary" ||
+        c === "printdisabled" ||
+        c.startsWith("booksbylanguage")
+    );
 
-    matched.push({
-      workKey: String(doc.key || ""),
-      candidate: {
-        id: `ol-${doc.key || preferredIsbn || i}`,
-        title: String(doc.title).trim(),
-        author: candidateAuthors[0] || undefined,
-        isbn: preferredIsbn || undefined,
-        totalPages,
-        coverUrl,
-        publisher: Array.isArray(doc.publisher) && doc.publisher[0] ? String(doc.publisher[0]).trim() : undefined,
-        publishedYear: doc.first_publish_year ? String(doc.first_publish_year) : undefined,
-        source: "Open Library",
-        isEstimated: false,
-        matchScore,
-      },
-    });
-  }
+    const coverUrl = `https://archive.org/services/img/${encodeURIComponent(identifier)}`;
+    const matchScore =
+      (exactIsbnHit ? 1.98 : titleScore + authorScore * 0.45) +
+      (isCuratedBookCollection ? 0.16 : 0) +
+      computeLanguageBonus(editionLang, languagePref);
 
-  matched.sort((a, b) => b.candidate.matchScore - a.candidate.matchScore);
-  const topSubset = matched.slice(0, 5);
-  return Promise.all(
-    topSubset.map((entry, idx) =>
-      idx < 2 && entry.candidate.totalPages === 0
-        ? enrichOpenLibraryCandidate(entry.candidate, entry.workKey, isbn)
-        : Promise.resolve(entry.candidate)
-    )
-  );
-}
-
-async function fetchGoogleBooksRaw(rawQuery: string, timeoutMs = 6500): Promise<any[]> {
-  const queryUrl = `https://www.googleapis.com/books/v1/volumes?q=${rawQuery}&maxResults=10&printType=books`;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(queryUrl, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (!res.ok) return [];
-    const data = await res.json() as any;
-    return Array.isArray(data?.items) ? data.items : [];
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    console.warn(`[GoogleBooks] Search failed:`, err?.message || err);
-    return [];
-  }
-}
-
-async function fetchCandidatesFromGoogleBooks(
-  title: string,
-  author: string,
-  isbn: string
-): Promise<BookCandidate[]> {
-  let items: any[] = [];
-
-  if (isbn) {
-    items = await fetchGoogleBooksRaw(`isbn:${encodeURIComponent(isbn)}`);
-  }
-
-  if (items.length === 0 && title) {
-    const parts: string[] = [`intitle:${encodeURIComponent(`"${title}"`)}`];
-    if (author) parts.push(`inauthor:${encodeURIComponent(`"${author}"`)}`);
-    items = await fetchGoogleBooksRaw(parts.join("+"));
-  }
-
-  if (items.length === 0 && title) {
-    const parts: string[] = [`intitle:${encodeURIComponent(title)}`];
-    if (author) parts.push(`inauthor:${encodeURIComponent(author)}`);
-    items = await fetchGoogleBooksRaw(parts.join("+"));
-  }
-
-  const results: BookCandidate[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const vol = item?.volumeInfo;
-    if (!vol?.title) continue;
-
-    const identifiers = Array.isArray(vol.industryIdentifiers)
-      ? vol.industryIdentifiers.map((idObj: any) => idObj?.identifier)
-      : [];
-    const preferredIsbn = pickPreferredIsbn(identifiers, isbn);
-    const exactIsbnHit = Boolean(isbn && identifiers.some((x: any) => normalizeIsbn(x) === isbn));
-
-    const titleScore = title ? computeTitleMatchScore(title, String(vol.title)) : 1;
-    const candidateAuthors: string[] = Array.isArray(vol.authors)
-      ? vol.authors.map((a: any) => String(a || "").trim()).filter(Boolean)
-      : [];
-    const authorScore = author ? computeAuthorMatchScore(author, candidateAuthors) : 0;
-
-    if (!exactIsbnHit) {
-      if (title && titleScore < 0.48) continue;
-      if (author && authorScore < 0.35) continue;
-    }
-
-    const totalPages = typeof vol.pageCount === "number" && vol.pageCount > 0
-      ? Math.round(vol.pageCount)
-      : 0;
-    const coverUrl = sanitizeCoverUrl(vol.imageLinks?.thumbnail || vol.imageLinks?.smallThumbnail || "");
-    const yearMatch = String(vol.publishedDate || "").match(/\d{4}/);
-    const completenessBonus = (totalPages > 0 ? 0.16 : 0) + (coverUrl ? 0.14 : 0);
-    const matchScore = (exactIsbnHit ? 2.05 : titleScore + authorScore * 0.45) + completenessBonus;
-
-    results.push({
-      id: `gb-${item.id || preferredIsbn || i}`,
-      title: String(vol.title).trim(),
-      author: candidateAuthors[0] || undefined,
+    candidates.push({
+      id: `ia-${identifier}`,
+      title: docTitle,
+      author: creatorList[0] || undefined,
       isbn: preferredIsbn || undefined,
       totalPages,
       coverUrl,
-      publisher: vol.publisher ? String(vol.publisher).trim() : undefined,
+      publisher,
       publishedYear: yearMatch ? yearMatch[0] : undefined,
-      source: "Google Books",
+      language: editionLang,
+      source: "Digital Archive",
       isEstimated: false,
       matchScore,
     });
   }
 
-  return results;
+  return { candidates, timedOut };
 }
 
-let groundingQuotaCooldownUntil = 0;
-
-function parseAiBookCandidates(
-  rawJsonText: string,
-  fallbackTitle: string,
-  fallbackAuthor: string,
-  fallbackIsbn: string
-): BookCandidate[] {
-  const parsed = cleanAndParseJson(rawJsonText, { candidates: [] });
-  const rawList = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
-  const candidates: BookCandidate[] = [];
-
-  for (let i = 0; i < rawList.length; i++) {
-    const c = rawList[i];
-    if (!c || typeof c !== "object") continue;
-    const cTitle = String(c.title || fallbackTitle || "").trim();
-    if (!cTitle) continue;
-
-    const cAuthor = typeof c.author === "string" ? c.author.trim() : "";
-    const cIsbn = normalizeIsbn(c.isbn);
-    const rawPages = c.totalPages ?? c.pageCount ?? 0;
-    const totalPages = typeof rawPages === "number"
-      ? Math.max(0, Math.round(rawPages))
-      : Math.max(0, parseInt(String(rawPages), 10) || 0);
-    const coverUrl = sanitizeCoverUrl(c.coverUrl);
-
-    if (fallbackAuthor && cAuthor && computeAuthorMatchScore(fallbackAuthor, [cAuthor]) < 0.35) {
-      continue;
-    }
-
-    candidates.push({
-      id: `ai-${i}-${cIsbn || Date.now()}`,
-      title: cTitle,
-      author: cAuthor || (fallbackAuthor || undefined),
-      isbn: cIsbn || (fallbackIsbn || undefined),
-      totalPages,
-      coverUrl,
-      publisher: typeof c.publisher === "string" ? c.publisher.trim() || undefined : undefined,
-      publishedYear: typeof c.publishedYear === "string" ? c.publishedYear.trim() || undefined : undefined,
-      source: "Penelusuran AI",
-      isEstimated: true,
-      matchScore: 0.75 + (totalPages > 0 ? 0.15 : 0),
-    });
-  }
-
-  return candidates.slice(0, 3);
-}
-
-async function fetchCandidatesViaGroundedAI(
+async function fetchCandidatesFromOpenLibrary(
   title: string,
   author: string,
-  isbn: string
-): Promise<BookCandidate[]> {
-  const gemini = getGeminiClient();
-  const queryParts = [
-    title ? `Judul: "${title}"` : "",
-    author ? `Penulis: "${author}"` : "",
-    isbn ? `ISBN: "${isbn}"` : "",
-  ].filter(Boolean).join("\n");
+  isbn: string,
+  languagePref: EditionLanguagePreference
+): Promise<{ candidates: BookCandidate[]; timedOut: boolean }> {
+  const candidates: BookCandidate[] = [];
+  let timedOut = false;
 
-  const prompt = `Cari informasi bibliografi resmi yang paling akurat dari buku berikut:
-${queryParts}
+  // 1. Exact ISBN lookup directly via /isbn/{isbn}.json
+  if (isbn) {
+    const [ed, isbnSearchRes] = await Promise.all([
+      fetchOpenLibraryJson(`/isbn/${encodeURIComponent(isbn)}.json`),
+      fetchOpenLibrarySearch(new URLSearchParams({ isbn })),
+    ]);
+    timedOut = timedOut || isbnSearchRes.timedOut;
 
-Kembalikan HANYA JSON valid berbentuk:
-{
-  "candidates": [
-    {
-      "title": "Judul resmi buku",
-      "author": "Nama lengkap penulis",
-      "isbn": "ISBN-13 atau ISBN-10 jika ditemukan, atau kosong",
-      "totalPages": 0,
-      "publisher": "Nama penerbit jika diketahui",
-      "publishedYear": "YYYY jika diketahui",
-      "coverUrl": ""
-    }
-  ]
-}
+    const searchAuthors: string[] =
+      Array.isArray(isbnSearchRes.docs?.[0]?.author_name)
+        ? isbnSearchRes.docs[0].author_name.map((a: any) => String(a || "").trim()).filter(Boolean)
+        : [];
 
-Aturan ketat:
-1. Prioritaskan edisi asli atau cetakan utama yang persis sesuai judul, penulis, dan ISBN dari pengguna. Jangan mengembalikan buku ringkasan/summary pihak ketiga kecuali memang diminta.
-2. totalPages harus berupa bilangan bulat halaman cetakan sebenarnya (isi 0 jika tidak diketahui pasti, jangan mengarang).
-3. coverUrl isi HANYA jika menemukan URL gambar sampul HTTPS langsung yang valid dari Open Library atau Google Books; jika ragu, isi "".
-4. Kembalikan maksimal 3 kandidat teratas yang paling relevan.`;
-
-  // 1. Try Google Search Grounding ONCE if not currently in quota cooldown
-  if (Date.now() >= groundingQuotaCooldownUntil) {
-    try {
-      const response = await gemini.models.generateContent({
-        model: GEMINI_SYNTHESIS_MODEL,
-        contents: prompt,
-        config: {
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          tools: [{ googleSearch: {} }],
-        },
-      });
-      const candidates = parseAiBookCandidates(response.text || "", title, author, isbn);
-      if (candidates.length > 0) {
-        console.log(`[Google Gemini] Grounded book-info served via ${GEMINI_SYNTHESIS_MODEL}`);
-        return candidates;
-      }
-    } catch (err: any) {
-      if (isAuthError(err)) {
-        throw new Error("Kunci API Google Gemini tidak valid atau ditolak. Periksa GEMINI_API_KEY di Settings > Secrets.");
-      }
-      if (isQuotaError(err)) {
-        // Search Grounding has strict free-tier limits; cool down and fall back to standard lite generateContent
-        groundingQuotaCooldownUntil = Date.now() + 10 * 60 * 1000;
-        console.info("[Google Gemini] Kuota Google Search Grounding tercapai, beralih ke mode bibliografi standar.");
-      } else {
-        console.info("[Google Gemini] Grounded book-info dilewati:", err?.message || err);
-      }
-    }
-  }
-
-  // 2. Fallback to standard lite generateContent (without googleSearch tool)
-  const schema = {
-    type: Type.OBJECT,
-    properties: {
-      candidates: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            author: { type: Type.STRING },
-            isbn: { type: Type.STRING },
-            totalPages: { type: Type.INTEGER },
-            publisher: { type: Type.STRING },
-            publishedYear: { type: Type.STRING },
-            coverUrl: { type: Type.STRING },
-          },
-          required: ["title", "totalPages", "coverUrl"],
-        },
-      },
-    },
-    required: ["candidates"],
-  };
-
-  const text = await executeAIRequest({
-    systemInstruction: "Mesin Referensi Bibliografi Madrasah. Berikan data edisi buku terakurat sesuai input pengguna tanpa mengarang sampul.",
-    userPrompt: prompt,
-    jsonMode: true,
-    responseSchema: schema,
-    modelTier: "lite",
-    purpose: "book-info-fallback",
-  });
-
-  return parseAiBookCandidates(text, title, author, isbn);
-}
-
-function deduplicateAndRankCandidates(list: BookCandidate[]): BookCandidate[] {
-  const sorted = [...list].sort((a, b) => b.matchScore - a.matchScore);
-  const unique: BookCandidate[] = [];
-
-  for (const item of sorted) {
-    const normTitle = normalizeForMatch(item.title);
-    const normAuthor = normalizeForMatch(item.author || "");
-    const existingIdx = unique.findIndex((u) => {
-      if (item.isbn && u.isbn && item.isbn === u.isbn) return true;
-      return (
-        normalizeForMatch(u.title) === normTitle &&
-        normalizeForMatch(u.author || "") === normAuthor &&
-        u.totalPages === item.totalPages
+    if (ed) {
+      const resolvedAuthors = await resolveIsbnAuthorNames(ed, searchAuthors);
+      const exactCandidate = buildOpenLibraryEditionCandidate(
+        ed,
+        resolvedAuthors,
+        title,
+        author,
+        isbn,
+        languagePref,
+        true
       );
-    });
+      if (exactCandidate) {
+        if (exactCandidate.totalPages === 0 && typeof ed?.ocaid === "string" && ed.ocaid.trim()) {
+          exactCandidate.totalPages = await fetchArchiveEntryPageCount(ed.ocaid.trim());
+        }
+        candidates.push(exactCandidate);
+      }
 
-    if (existingIdx === -1) {
-      unique.push(item);
-    } else {
-      // Enrich missing cover/pages/isbn on the existing higher-ranked candidate if same edition
-      const current = unique[existingIdx];
-      unique[existingIdx] = {
-        ...current,
-        totalPages: current.totalPages || item.totalPages,
-        coverUrl: current.coverUrl || item.coverUrl,
-        isbn: current.isbn || item.isbn,
-        publisher: current.publisher || item.publisher,
-        publishedYear: current.publishedYear || item.publishedYear,
-      };
+      const workKey = Array.isArray(ed?.works) && ed.works[0]?.key ? String(ed.works[0].key) : "";
+      if (workKey.startsWith("/works/")) {
+        const edList = await fetchOpenLibraryJson(`${workKey}/editions.json?limit=25`);
+        const entries: any[] = Array.isArray(edList?.entries) ? edList.entries : [];
+        for (const entry of entries) {
+          const sibling = buildOpenLibraryEditionCandidate(
+            entry,
+            resolvedAuthors,
+            title || String(ed.title || ""),
+            author,
+            isbn,
+            languagePref,
+            false
+          );
+          if (sibling) candidates.push(sibling);
+        }
+      }
     }
-
-    if (unique.length >= 5) break;
   }
 
-  return unique;
+  // 2. Work -> Individual Editions lookup when title is given and ISBN yielded nothing or few hits
+  if (candidates.length === 0 && title) {
+    const primaryParams = new URLSearchParams({ title });
+    if (author) primaryParams.set("author", author);
+    const primaryRes = await fetchOpenLibrarySearch(primaryParams);
+    let docs = primaryRes.docs;
+    timedOut = timedOut || primaryRes.timedOut;
+
+    if (docs.length === 0 && !primaryRes.timedOut) {
+      const fallbackQuery = author ? `${title} ${author}` : title;
+      const fallbackRes = await fetchOpenLibrarySearch(new URLSearchParams({ q: fallbackQuery }));
+      docs = fallbackRes.docs;
+      timedOut = timedOut || fallbackRes.timedOut;
+    }
+
+    const matchedWorks: Array<{ workKey: string; authors: string[]; score: number; doc: any }> = [];
+    for (const doc of docs) {
+      if (!doc?.title || !doc?.key || !String(doc.key).startsWith("/works/")) continue;
+
+      const titleScore = computeTitleMatchScore(title, String(doc.title));
+      const candidateAuthors: string[] = Array.isArray(doc.author_name)
+        ? doc.author_name.map((a: any) => String(a || "").trim()).filter(Boolean)
+        : [];
+      const authorScore = author ? computeAuthorMatchScore(author, candidateAuthors) : 0;
+
+      if (titleScore < MIN_TITLE_SCORE) continue;
+      if (author && authorScore < MIN_AUTHOR_SCORE) continue;
+
+      const workLangBonus =
+        languagePref === "id" && Array.isArray(doc.language) && doc.language.includes("ind")
+          ? 0.25
+          : 0;
+
+      matchedWorks.push({
+        workKey: String(doc.key),
+        authors: candidateAuthors,
+        score: titleScore + authorScore * 0.45 + workLangBonus,
+        doc,
+      });
+    }
+
+    matchedWorks.sort((a, b) => b.score - a.score);
+    const topWorks = matchedWorks.slice(0, 3);
+
+    const workEditionsResults = await Promise.all(
+      topWorks.map(async (work) => {
+        const edList = await fetchOpenLibraryJson(`${work.workKey}/editions.json?limit=40`);
+        return {
+          work,
+          entries: Array.isArray(edList?.entries) ? edList.entries : [],
+        };
+      })
+    );
+
+    const ocaidEnrichTargets: Array<{ candidate: BookCandidate; ocaid: string }> = [];
+
+    for (const { work, entries } of workEditionsResults) {
+      let workHadSpecificEdition = false;
+      for (const entry of entries) {
+        const cand = buildOpenLibraryEditionCandidate(
+          entry,
+          work.authors,
+          title,
+          author,
+          isbn,
+          languagePref,
+          false
+        );
+        if (cand) {
+          candidates.push(cand);
+          workHadSpecificEdition = true;
+          if (cand.totalPages === 0 && typeof entry?.ocaid === "string" && entry.ocaid.trim()) {
+            ocaidEnrichTargets.push({ candidate: cand, ocaid: entry.ocaid.trim() });
+          }
+        }
+      }
+
+      if (!workHadSpecificEdition && work.doc?.cover_i) {
+        candidates.push({
+          id: `ol-work-${work.workKey}`,
+          title: String(work.doc.title).trim(),
+          author: work.authors[0] || undefined,
+          totalPages: 0,
+          coverUrl: `https://covers.openlibrary.org/b/id/${work.doc.cover_i}-L.jpg?default=false`,
+          publishedYear: work.doc.first_publish_year
+            ? String(work.doc.first_publish_year)
+            : undefined,
+          source: "Open Library",
+          isEstimated: false,
+          matchScore: work.score,
+        });
+      }
+    }
+
+    // Cross-enrich up to 3 Open Library editions lacking page counts from their Digital Archive ocaid
+    if (ocaidEnrichTargets.length > 0) {
+      await Promise.all(
+        ocaidEnrichTargets.slice(0, 3).map(async ({ candidate, ocaid }) => {
+          const pages = await fetchArchiveEntryPageCount(ocaid);
+          if (pages > 0) candidate.totalPages = pages;
+        })
+      );
+    }
+  }
+
+  return { candidates, timedOut };
 }
 
   apiRouter.post("/ai/book-info", async (req, res) => {
@@ -1687,85 +1647,78 @@ function deduplicateAndRankCandidates(list: BookCandidate[]): BookCandidate[] {
     };
 
     try {
-      const { title, author, isbn, forceRefresh } = req.body;
+      const { title, author, isbn, languagePref: rawPref, forceRefresh } = req.body;
       const cleanTitle = String(title || "").trim();
       const cleanAuthor = String(author || "").trim();
       const cleanIsbn = normalizeIsbn(isbn);
+      const languagePref: EditionLanguagePreference =
+        rawPref === "id" || rawPref === "original" ? rawPref : "all";
 
       if (!cleanTitle && !cleanIsbn) {
         return sendError("Judul buku atau ISBN wajib diisi untuk pencarian metadata.");
       }
 
-      const cacheKey = getCacheKey("book-info-v2", {
+      const cacheKey = getCacheKey("book-info-v4", {
         title: cleanTitle.toLowerCase(),
         author: cleanAuthor.toLowerCase(),
         isbn: cleanIsbn,
+        languagePref,
       });
 
       if (!forceRefresh) {
         const cached = aiCache.get(cacheKey);
         if (cached) {
           console.log(`[Cache Hit] /api/ai/book-info`);
-          sendLog("Memuat kandidat edisi dari cache...");
+          sendLog("Memuat edisi Open Library & Digital Archive dari cache...");
           return sendResult(cached);
         }
       }
 
       sendLog(
         cleanIsbn
-          ? `Mencocokkan ISBN ${cleanIsbn} di Open Library dan Google Books...`
-          : "Mencari edisi presisi di katalog Open Library dan Google Books..."
+          ? `Memeriksa ISBN ${cleanIsbn} di Open Library dan Digital Archive...`
+          : "Mencari edisi terverifikasi di Open Library & Digital Archive..."
       );
 
-      const [olCandidates, gbCandidates] = await Promise.all([
-        fetchCandidatesFromOpenLibrary(cleanTitle, cleanAuthor, cleanIsbn),
-        fetchCandidatesFromGoogleBooks(cleanTitle, cleanAuthor, cleanIsbn),
+      const [olRes, archiveRes] = await Promise.all([
+        fetchCandidatesFromOpenLibrary(cleanTitle, cleanAuthor, cleanIsbn, languagePref),
+        fetchCandidatesFromDigitalArchive(cleanTitle, cleanAuthor, cleanIsbn, languagePref),
       ]);
 
-      let mergedCandidates = deduplicateAndRankCandidates([...gbCandidates, ...olCandidates]);
+      const mergedPreVerify = deduplicateAndRankCandidates(
+        [...olRes.candidates, ...archiveRes.candidates],
+        languagePref,
+        10
+      );
+      const verifiedCovers = await verifyCandidateCovers(mergedPreVerify);
+      const finalCandidates = deduplicateAndRankCandidates(verifiedCovers, languagePref, 8);
 
-      const hasCompletePageCandidate = mergedCandidates.some((c) => c.totalPages > 0);
-      if (mergedCandidates.length === 0 || !hasCompletePageCandidate) {
-        sendLog("Katalog publik belum lengkap. Mencari pelengkap metadata via Google Gemini...");
-        try {
-          const aiCandidates = await fetchCandidatesViaGroundedAI(cleanTitle, cleanAuthor, cleanIsbn);
-          if (aiCandidates.length > 0) {
-            mergedCandidates = deduplicateAndRankCandidates([
-              ...mergedCandidates,
-              ...aiCandidates,
-            ]);
-          }
-        } catch (aiErr: any) {
-          console.info("[Book-Info AI Fallback]", aiErr?.message || aiErr);
-          if (mergedCandidates.length === 0) {
-            return sendError(aiErr?.message || "Kuota Google Gemini sedang penuh atau pencarian metadata gagal.");
-          }
-          sendLog("Kuota AI sedang terbatas. Menampilkan kandidat dari katalog publik yang ditemukan...");
-        }
-      }
-
-      const top = mergedCandidates[0];
+      const top = finalCandidates[0];
       const payload = {
-        candidates: mergedCandidates.slice(0, 5),
+        candidates: finalCandidates,
         title: top?.title || cleanTitle,
         author: top?.author || cleanAuthor || undefined,
         isbn: top?.isbn || cleanIsbn || undefined,
         totalPages: top?.totalPages || 0,
         coverUrl: top?.coverUrl || "",
-        isEstimated: Boolean(top?.isEstimated),
+        isEstimated: false,
       };
 
-      if (mergedCandidates.length > 0) {
+      if (finalCandidates.length > 0) {
         aiCache.set(cacheKey, payload);
-        sendLog(`Menemukan ${mergedCandidates.length} kandidat edisi yang cocok.`);
+        sendLog(
+          `Menemukan ${finalCandidates.length} edisi terverifikasi dari Open Library & Digital Archive.`
+        );
+      } else if (olRes.timedOut && archiveRes.timedOut) {
+        sendLog("Open Library & Digital Archive merespons lambat; menampilkan hasil Google Books yang tersedia.");
       } else {
-        sendLog("Tidak ditemukan edisi yang cocok persis di katalog maupun web.");
+        sendLog("Tidak ditemukan edisi terverifikasi yang cocok di Open Library & Digital Archive.");
       }
 
       return sendResult(payload);
     } catch (error: any) {
-      console.error("AI Book Info Error:", error);
-      return sendError(error.message || "Gagal mengambil metadata buku");
+      console.error("Book Info Error:", error);
+      return sendError(error.message || "Gagal mengambil metadata buku dari Open Library & Digital Archive");
     }
   });
 

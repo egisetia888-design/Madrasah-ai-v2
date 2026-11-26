@@ -1,75 +1,63 @@
 import { useNotesStore } from '../store/notesStore';
 import { useKnowledgeStore } from '../store/knowledgeStore';
-import { Relation } from '../types';
+import {
+  computeAiRelationBackfillPlan,
+  computeNoteMigrationPlan,
+  type AiRelationAuditSummary,
+} from './dataMigrationLogic';
 
-export const migrateNotesToFragments = () => {
+export const migrateNotesToFragments = (): number => {
   const { notes, updateNote } = useNotesStore.getState();
-  const { addSourceFragment, addRelation, sourceFragments, relations } = useKnowledgeStore.getState();
+  const { addSourceFragment, addRelation, sourceFragments, relations } =
+    useKnowledgeStore.getState();
 
-  let migratedCount = 0;
+  const plan = computeNoteMigrationPlan(notes, sourceFragments, relations);
 
-  notes.forEach((note) => {
-    // If the note has a rawQuote and hasn't been completely migrated
-    if (note.rawQuote && note.rawQuote.trim() !== '') {
-      
-      // Check if we already migrated this by checking existing relations
-      const alreadyMigrated = relations.some(
-        (r) => r.sourceNodeId === note.id && r.relationType === 'references'
-      );
+  for (const creation of plan.creations) {
+    const fragmentId = addSourceFragment({
+      sourceId: creation.sourceId,
+      quote: creation.quote,
+      location: creation.location,
+      reliabilityScore: creation.reliabilityScore,
+    });
 
-      if (!alreadyMigrated) {
-        // Create a SourceFragment
-        const fragmentId = addSourceFragment({
-          sourceId: note.sourceId || null,
-          quote: note.rawQuote,
-          location: note.referenceCitation || 'Unknown location',
-          reliabilityScore: 1.0, // Default for user-created notes
-        });
+    addRelation({
+      sourceNodeId: creation.noteId,
+      targetNodeId: fragmentId,
+      relationType: 'references',
+      confidenceScore: 1.0,
+      createdBy: 'user',
+      explanation: 'Dimigrasikan dari kutipan mentah catatan lama',
+      verifiedBySystem: true,
+    });
+  }
 
-        // Create Relation: Note -> references -> SourceFragment
-        addRelation({
-          sourceNodeId: note.id,
-          targetNodeId: fragmentId,
-          relationType: 'references',
-          confidenceScore: 1.0,
-          createdBy: 'user',
-          explanation: 'Migrated from legacy raw quote',
-          verifiedBySystem: true,
-        });
+  for (const noteId of plan.notesToClear) {
+    updateNote(noteId, {
+      rawQuote: undefined,
+      referenceCitation: undefined,
+    });
+  }
 
-        migratedCount++;
-        
-        // Mark as deprecated in Note (Optionally we can clear them out, but for zero-data-loss we keep them for a while or clear them to avoid duplicate data)
-        // For safe migration, we just leave rawQuote intact but it will be ignored by the UI later, or we can clear it.
-        // We'll clear it to prevent re-migration issues and clean up the old schema.
-        updateNote(note.id, {
-          rawQuote: undefined,
-          referenceCitation: undefined
-        });
-      }
-    }
-  });
-
-  return migratedCount;
+  return plan.migratedCount;
 };
 
 /**
- * Ta'dib Layer migration:
- * Scans all relations created by 'ai_agent' that were previously mistakenly marked
- * with verifiedBySystem: true, and resets verifiedBySystem to false to maintain epistemic integrity.
+ * Ta'dib Layer audit & backfill:
+ * Inspects all AI-generated relations and normalizes unconfirmed legacy entries
+ * without overwriting explicit user confirmations (`verifiedAt`).
  */
-export const backfillUnverifiedAiRelations = (): number => {
+export const auditAiRelationsWithSummary = (): AiRelationAuditSummary => {
   const { relations, updateRelation } = useKnowledgeStore.getState();
-  let updatedCount = 0;
+  const summary = computeAiRelationBackfillPlan(relations);
 
-  relations.forEach((rel) => {
-    if (rel.createdBy === 'ai_agent' && rel.verifiedBySystem) {
-      updateRelation(rel.id, {
-        verifiedBySystem: false,
-      });
-      updatedCount++;
-    }
-  });
+  for (const item of summary.updates) {
+    updateRelation(item.id, item.patch);
+  }
 
-  return updatedCount;
+  return summary;
+};
+
+export const backfillUnverifiedAiRelations = (): number => {
+  return auditAiRelationsWithSummary().normalizedCount;
 };

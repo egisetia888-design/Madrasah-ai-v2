@@ -5,7 +5,7 @@ import { useWritingStore } from "../store/writingStore";
 import { useProjectsStore } from "../store/projectsStore";
 import { useCurriculumStore } from "../store/curriculumStore";
 import { useReviewStore } from "../store/reviewStore";
-import { RelationType, NodeType, UUID } from "../types";
+import { RelationType, RelationCreator, NodeType } from "../types";
 
 export interface DetectedEntity {
   id: string;
@@ -74,12 +74,12 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
     if (!raw) return;
 
     // Look up in notes
-    const note = notes.find(n => n.title.toLowerCase() === raw.toLowerCase());
+    const note = notes.find(n => (n.title || '').toLowerCase() === raw.toLowerCase());
     if (note && !addedIds.has(note.id)) {
       addedIds.add(note.id);
       results.push({
         id: note.id,
-        label: note.title,
+        label: note.title || '',
         type: 'note',
         matchedText: wl,
         relationType: 'references',
@@ -89,12 +89,16 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
     }
 
     // Look up in concepts
-    const concept = concepts.find(c => c.name.toLowerCase() === raw.toLowerCase() || c.aliases.some(a => a.toLowerCase() === raw.toLowerCase()));
+    const concept = concepts.find(
+      c =>
+        (c.name || '').toLowerCase() === raw.toLowerCase() ||
+        (c.aliases || []).some(a => (a || '').toLowerCase() === raw.toLowerCase())
+    );
     if (concept && !addedIds.has(concept.id)) {
       addedIds.add(concept.id);
       results.push({
         id: concept.id,
-        label: concept.name,
+        label: concept.name || '',
         type: 'concept',
         matchedText: wl,
         relationType: 'defines',
@@ -104,12 +108,12 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
     }
 
     // Look up in books
-    const book = books.find(b => b.title.toLowerCase() === raw.toLowerCase());
+    const book = books.find(b => (b.title || '').toLowerCase() === raw.toLowerCase());
     if (book && !addedIds.has(book.id)) {
       addedIds.add(book.id);
       results.push({
         id: book.id,
-        label: book.title,
+        label: book.title || '',
         type: 'book',
         matchedText: wl,
         relationType: 'references',
@@ -119,21 +123,22 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
   });
 
   // 2. Exact & Keyword Mention Scanner
-  const lowerText = text.toLowerCase();
+  const lowerText = (text || '').toLowerCase();
 
   // Scan Concepts (highest priority for knowledge atomicity)
   concepts.forEach(c => {
     if (addedIds.has(c.id)) return;
-    const cName = c.name.toLowerCase().trim();
+    const rawName = c.name || '';
+    const cName = rawName.toLowerCase().trim();
     if (cName.length >= 3 && !STOP_WORDS.has(cName)) {
       const regex = new RegExp(`\\b${escapeRegExp(cName)}\\b`, 'i');
       if (regex.test(lowerText)) {
         addedIds.add(c.id);
         results.push({
           id: c.id,
-          label: c.name,
+          label: rawName,
           type: 'concept',
-          matchedText: c.name,
+          matchedText: rawName,
           relationType: 'expands_on',
           confidence: 0.95
         });
@@ -141,15 +146,15 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
       }
     }
     // Check aliases
-    for (const alias of c.aliases) {
-      const aLower = alias.toLowerCase().trim();
+    for (const alias of c.aliases || []) {
+      const aLower = (alias || '').toLowerCase().trim();
       if (aLower.length >= 3 && !STOP_WORDS.has(aLower)) {
         const regex = new RegExp(`\\b${escapeRegExp(aLower)}\\b`, 'i');
         if (regex.test(lowerText)) {
           addedIds.add(c.id);
           results.push({
             id: c.id,
-            label: c.name,
+            label: rawName,
             type: 'concept',
             matchedText: alias,
             relationType: 'expands_on',
@@ -164,16 +169,17 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
   // Scan Books
   books.forEach(b => {
     if (addedIds.has(b.id)) return;
-    const bTitle = b.title.toLowerCase().trim();
+    const rawTitle = b.title || '';
+    const bTitle = rawTitle.toLowerCase().trim();
     if (bTitle.length >= 4 && !STOP_WORDS.has(bTitle)) {
       const regex = new RegExp(`\\b${escapeRegExp(bTitle)}\\b`, 'i');
       if (regex.test(lowerText)) {
         addedIds.add(b.id);
         results.push({
           id: b.id,
-          label: b.title,
+          label: rawTitle,
           type: 'book',
-          matchedText: b.title,
+          matchedText: rawTitle,
           relationType: 'references',
           confidence: 0.9
         });
@@ -184,16 +190,17 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
   // Scan Authors
   authors.forEach(a => {
     if (addedIds.has(a.id)) return;
-    const aName = a.name.toLowerCase().trim();
+    const rawName = a.name || '';
+    const aName = rawName.toLowerCase().trim();
     if (aName.length >= 4 && !STOP_WORDS.has(aName)) {
       const regex = new RegExp(`\\b${escapeRegExp(aName)}\\b`, 'i');
       if (regex.test(lowerText)) {
         addedIds.add(a.id);
         results.push({
           id: a.id,
-          label: a.name,
+          label: rawName,
           type: 'author',
-          matchedText: a.name,
+          matchedText: rawName,
           relationType: 'references',
           confidence: 0.85
         });
@@ -204,16 +211,17 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
   // Scan Other Notes
   notes.forEach(n => {
     if (addedIds.has(n.id)) return;
-    const nTitle = n.title.toLowerCase().trim();
+    const rawTitle = n.title || '';
+    const nTitle = rawTitle.toLowerCase().trim();
     if (nTitle.length >= 4 && !STOP_WORDS.has(nTitle)) {
       const regex = new RegExp(`\\b${escapeRegExp(nTitle)}\\b`, 'i');
       if (regex.test(lowerText)) {
         addedIds.add(n.id);
         results.push({
           id: n.id,
-          label: n.title,
+          label: rawTitle,
           type: 'note',
-          matchedText: n.title,
+          matchedText: rawTitle,
           relationType: 'supports',
           confidence: 0.88
         });
@@ -224,16 +232,17 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
   // Scan Projects
   projects.forEach(p => {
     if (addedIds.has(p.id)) return;
-    const pTitle = p.title.toLowerCase().trim();
+    const rawTitle = p.title || '';
+    const pTitle = rawTitle.toLowerCase().trim();
     if (pTitle.length >= 4 && !STOP_WORDS.has(pTitle)) {
       const regex = new RegExp(`\\b${escapeRegExp(pTitle)}\\b`, 'i');
       if (regex.test(lowerText)) {
         addedIds.add(p.id);
         results.push({
           id: p.id,
-          label: p.title,
+          label: rawTitle,
           type: 'project',
-          matchedText: p.title,
+          matchedText: rawTitle,
           relationType: 'applies',
           confidence: 0.85
         });
@@ -244,16 +253,17 @@ export function scanTextForEntities(text: string, currentEntityId?: string): Det
   // Scan Drafts
   drafts.forEach(d => {
     if (addedIds.has(d.id)) return;
-    const dTitle = d.title.toLowerCase().trim();
+    const rawTitle = d.title || '';
+    const dTitle = rawTitle.toLowerCase().trim();
     if (dTitle.length >= 4 && !STOP_WORDS.has(dTitle)) {
       const regex = new RegExp(`\\b${escapeRegExp(dTitle)}\\b`, 'i');
       if (regex.test(lowerText)) {
         addedIds.add(d.id);
         results.push({
           id: d.id,
-          label: d.title,
+          label: rawTitle,
           type: 'writing',
-          matchedText: d.title,
+          matchedText: rawTitle,
           relationType: 'references',
           confidence: 0.85
         });
@@ -311,7 +321,10 @@ export function runAutoLinker(): AutoLinkSummary {
     targetLabel: string,
     targetType: NodeType,
     relationType: RelationType,
-    explanation: string
+    explanation: string,
+    confidenceScore: number = 0.85,
+    createdBy: RelationCreator = 'ai_agent',
+    verifiedBySystem: boolean = false
   ) => {
     if (!sourceId || !targetId || sourceId === targetId) return;
     const key = `${sourceId}->${targetId}`;
@@ -333,10 +346,10 @@ export function runAutoLinker(): AutoLinkSummary {
         sourceNodeId: sourceId,
         targetNodeId: targetId,
         relationType,
-        confidenceScore: 0.95,
-        createdBy: 'ai_agent',
+        confidenceScore,
+        createdBy,
         explanation,
-        verifiedBySystem: false
+        verifiedBySystem: createdBy === 'user' ? verifiedBySystem : false
       });
       newAddedCount++;
     }
@@ -344,18 +357,18 @@ export function runAutoLinker(): AutoLinkSummary {
 
   // 1. Process Notes
   notes.forEach(note => {
-    // Note to Book (explicit source)
+    // Note to Book (explicit user source)
     if (note.sourceId) {
       const book = books.find(b => b.id === note.sourceId);
       if (book) {
-        registerLink(note.id, note.title, 'note', book.id, book.title, 'book', 'references', 'Catatan ini merujuk ke buku sumber');
+        registerLink(note.id, note.title, 'note', book.id, book.title, 'book', 'references', 'Catatan ini merujuk ke buku sumber', 1.0, 'user', true);
       }
     }
 
-    // Note content scanning
+    // Note content scanning (AI-discovered mentions)
     const entities = scanTextForEntities(`${note.title}\n${note.content}\n${note.rawQuote || ''}`, note.id);
     entities.forEach(ent => {
-      registerLink(note.id, note.title, 'note', ent.id, ent.label, ent.type, ent.relationType, `Ditemukan penyebutan otomatis pada teks: "${ent.matchedText}"`);
+      registerLink(note.id, note.title, 'note', ent.id, ent.label, ent.type, ent.relationType, `Ditemukan penyebutan otomatis pada teks: "${ent.matchedText}"`, ent.confidence, 'ai_agent', false);
     });
   });
 
@@ -364,16 +377,16 @@ export function runAutoLinker(): AutoLinkSummary {
     const textToScan = `${concept.name}\n${concept.definition}\n${concept.aliases.join(' ')}`;
     const entities = scanTextForEntities(textToScan, concept.id);
     entities.forEach(ent => {
-      registerLink(concept.id, concept.name, 'concept', ent.id, ent.label, ent.type, ent.relationType, `Konsep ini terhubung secara semantik dengan "${ent.label}"`);
+      registerLink(concept.id, concept.name, 'concept', ent.id, ent.label, ent.type, ent.relationType, `Konsep ini terhubung secara semantik dengan "${ent.label}"`, ent.confidence, 'ai_agent', false);
     });
   });
 
-  // 3. Process Books & Authors
+  // 3. Process Books & Authors (structural metadata)
   books.forEach(book => {
     if (book.authorId) {
       const author = authors.find(a => a.id === book.authorId);
       if (author) {
-        registerLink(book.id, book.title, 'book', author.id, author.name, 'author', 'references', `Buku ditulis oleh ${author.name}`);
+        registerLink(book.id, book.title, 'book', author.id, author.name, 'author', 'references', `Buku ditulis oleh ${author.name}`, 1.0, 'user', true);
       }
     }
   });
@@ -383,12 +396,12 @@ export function runAutoLinker(): AutoLinkSummary {
     if (frag.sourceId) {
       const book = books.find(b => b.id === frag.sourceId);
       if (book) {
-        registerLink(frag.id, `Kutipan: ${frag.quote.slice(0, 30)}...`, 'source_fragment', book.id, book.title, 'book', 'references', 'Fragmen diekstrak langsung dari buku');
+        registerLink(frag.id, `Kutipan: ${frag.quote.slice(0, 30)}...`, 'source_fragment', book.id, book.title, 'book', 'references', 'Fragmen diekstrak langsung dari buku', 1.0, 'user', true);
       }
     }
     const entities = scanTextForEntities(frag.quote, frag.id);
     entities.forEach(ent => {
-      registerLink(frag.id, `Kutipan: ${frag.quote.slice(0, 30)}...`, 'source_fragment', ent.id, ent.label, ent.type, ent.relationType, `Kutipan menyebutkan "${ent.label}"`);
+      registerLink(frag.id, `Kutipan: ${frag.quote.slice(0, 30)}...`, 'source_fragment', ent.id, ent.label, ent.type, ent.relationType, `Kutipan menyebutkan "${ent.label}"`, ent.confidence, 'ai_agent', false);
     });
   });
 
@@ -396,7 +409,7 @@ export function runAutoLinker(): AutoLinkSummary {
   drafts.forEach(draft => {
     const entities = scanTextForEntities(`${draft.title}\n${draft.content}`, draft.id);
     entities.forEach(ent => {
-      registerLink(draft.id, draft.title, 'writing', ent.id, ent.label, ent.type, ent.relationType, `Draf tulisan mengadopsi rujukan "${ent.label}"`);
+      registerLink(draft.id, draft.title, 'writing', ent.id, ent.label, ent.type, ent.relationType, `Draf tulisan mengadopsi rujukan "${ent.label}"`, ent.confidence, 'ai_agent', false);
     });
   });
 
@@ -404,7 +417,7 @@ export function runAutoLinker(): AutoLinkSummary {
   projects.forEach(project => {
     const entities = scanTextForEntities(`${project.title}\n${project.description}`, project.id);
     entities.forEach(ent => {
-      registerLink(project.id, project.title, 'project', ent.id, ent.label, ent.type, ent.relationType, `Proyek ini mengimplementasikan "${ent.label}"`);
+      registerLink(project.id, project.title, 'project', ent.id, ent.label, ent.type, ent.relationType, `Proyek ini mengimplementasikan "${ent.label}"`, ent.confidence, 'ai_agent', false);
     });
   });
 
@@ -414,13 +427,13 @@ export function runAutoLinker(): AutoLinkSummary {
       comp.bookIds.forEach(bId => {
         const book = books.find(b => b.id === bId);
         if (book) {
-          registerLink(comp.id, comp.title, 'concept', book.id, book.title, 'book', 'references', 'Buku kurikulum untuk kompetensi');
+          registerLink(comp.id, comp.title, 'concept', book.id, book.title, 'book', 'references', 'Buku kurikulum untuk kompetensi', 1.0, 'user', true);
         }
       });
     }
     const entities = scanTextForEntities(comp.title, comp.id);
     entities.forEach(ent => {
-      registerLink(comp.id, comp.title, 'concept', ent.id, ent.label, ent.type, ent.relationType, `Kompetensi mempelajari "${ent.label}"`);
+      registerLink(comp.id, comp.title, 'concept', ent.id, ent.label, ent.type, ent.relationType, `Kompetensi mempelajari "${ent.label}"`, ent.confidence, 'ai_agent', false);
     });
   });
 
@@ -429,7 +442,7 @@ export function runAutoLinker(): AutoLinkSummary {
     if (deck.noteId) {
       const note = notes.find(n => n.id === deck.noteId);
       if (note) {
-        registerLink(deck.id, deck.name, 'note', note.id, note.title, 'note', 'references', 'Dek review berbasis catatan');
+        registerLink(deck.id, deck.name, 'note', note.id, note.title, 'note', 'references', 'Dek review berbasis catatan', 1.0, 'user', true);
       }
     }
   });

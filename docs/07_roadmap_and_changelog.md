@@ -6,6 +6,11 @@ Dokumen ini melacak visi masa depan pengembangan fungsionalitas Madrasah serta m
 
 ## 7.0 Perbaikan Terbaru (Unreleased)
 
+* **Penyelarasan Pencarian Semantik Lokal, Arsitektur Data V2 & Kaidah Ta'dib**:
+  - **Kejujuran Epistemik Relasi (`verifiedAt` & Provenance)**: Menambahkan timestamp `verifiedAt` pada `Relation`/`Edge`; mencegah `useKnowledgeGraph.ts` memberi status `verifiedBySystem: true` pada edge hasil `scanTextForEntities`; mempertahankan konfirmasi manusia satu-ketuk `ProvenanceBadge` (kini menampilkan persentase confidence) agar tidak tertimpa oleh `Audit Relasi AI` (`auditAiRelationsWithSummary`).
+  - **Migrasi V2 & Kalibrasi Fragmen Sumber**: Memperbaiki `migrateNotesToFragments` agar mengecek tautan ke `SourceFragment` secara tepat (tidak terhalang tautan buku `references`), menetapkan `reliabilityScore` jujur (`0.1` untuk sumber tak tercatat, `0.7` untuk kutipan ber-sumber), serta menyediakan kalibrasi `reliabilityScore` langsung dari panel fragmen di `NoteDetailPage.tsx` lewat `updateSourceFragment`.
+  - **Keandalan Indeks Semantik Lokal**: Mengembalikan `Promise<boolean>` pada `indexNote`/`indexDraft`, menyambungkan pengindeksan otomatis di `QuickAddDialog` & `BookDetailPage`, mengecek vektor kosong (`[]`) serta opsi indeks ulang penuh di `SettingsPage.tsx`, dan menampilkan metrik cakupan serta status error jujur bila model `Transformers.js` gagal dimuat.
+
 * **Penghapusan Total Firebase & Optimalisasi Penyimpanan Lokal (IndexedDB)**:
   - **Zero-Config Local Onboarding**: Menghapus total `firebase` SDK, aturan Firestore, dan kebutuhan kredensial `VITE_FIREBASE_*`; mengganti halaman login dengan layar selamat datang ruang kerja lokal sederhana (`LoginPage.tsx`) lengkap dengan opsi pemulihan cadangan JSON cepat.
   - **Registri Multi-Store & Backup JSON Terpadu**: Memperbarui `src/store/indexedDbStorage.ts` agar mendaftarkan seluruh 8 *object store* `madrasah_db` beserta preferensi lokal, memperbaiki fitur ekspor/impor/reset agar menyentuh seluruh data IndexedDB secara utuh (`madrasah-local-v2` + fallback `v1`), serta menambahkan diagnostik kuota & permintaan *Persistent Storage* di `SettingsPage.tsx`.

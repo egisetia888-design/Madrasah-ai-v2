@@ -12,7 +12,7 @@ interface WritingState {
   addDraft: (draft: Omit<Draft, 'id' | 'createdAt' | 'status' | keyof SyncMetadata> & { status?: Draft['status'] }) => string;
   updateDraft: (id: string, draft: Partial<Draft>) => void;
   deleteDraft: (id: string) => void;
-  indexDraft: (id: string) => Promise<void>;
+  indexDraft: (id: string) => Promise<boolean>;
 }
 
 export const useWritingStore = create<WritingState>()(
@@ -56,19 +56,24 @@ export const useWritingStore = create<WritingState>()(
       indexDraft: async (id) => {
         const state = get();
         const draft = state.drafts.find(d => d.id === id);
-        if (!draft) return;
+        if (!draft) return false;
+
+        const textToEmbed = `${draft.title} ${draft.content}`.trim();
+        if (!textToEmbed) return false;
 
         try {
-          const textToEmbed = `${draft.title} ${draft.content}`;
           const embedding = await generateEmbedding(textToEmbed);
-          
+          if (!Array.isArray(embedding) || embedding.length === 0) return false;
+
           set((state) => ({
             drafts: state.drafts.map(d =>
               d.id === id ? { ...d, embedding } : d
             )
           }));
+          return true;
         } catch (error) {
           console.error('Failed to index draft:', error);
+          return false;
         }
       },
     }),
